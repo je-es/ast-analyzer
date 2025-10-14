@@ -1,0 +1,56 @@
+{
+	"name": "@je-es/ast-analyzer",
+	"version": "0.0.1",
+	"description": "A library for analyzing and validating Abstract Syntax Trees.",
+	"keywords": [
+		"je-es",
+		"ast",
+		"analyzer",
+		"type-checker",
+		"semantic-validator"
+	],
+	"license": "MIT",
+	"main": "./dist/ast-analyzer.js",
+	"module": "./dist/ast-analyzer.mjs",
+	"types": "./dist/ast-analyzer.d.ts",
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"test": "tsup && jest",
+		"build": "tsup",
+		"app": "tsup && node ./dist/ast-analyzer.js"
+	},
+	"author": {
+		"name": "Maysara Elshewehy",
+		"email": "maysara.elshewehy@gmail.com",
+		"url": "https://github.com/maysara-elshewehy"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/je-es/ast-analyzer.git"
+	},
+	"bugs": {
+		"url": "https://github.com/je-es/ast-analyzer/issues"
+	},
+	"homepage": "https://github.com/je-es/ast-analyzer#readme",
+	"devDependencies": {
+		"@eslint/js": "^9.34.0",
+		"@stylistic/eslint-plugin": "^5.3.1",
+		"@types/jest": "^29.5.12",
+		"@types/node": "^20.12.7",
+		"jest": "^29.7.0",
+		"ts-jest": "^29.1.2",
+		"ts-node": "^10.9.2",
+		"tsup": "^8.0.2",
+		"typescript": "^5.4.5",
+		"typescript-eslint": "^8.42.0"
+	},
+	"dependencies": {
+		"@je-es/ast": "^0.0.1",
+		"@je-es/lexer": "^0.1.6",
+		"@je-es/parser": "^0.1.5",
+		"@je-es/syntax": "^0.1.8",
+		"@kemet-lang/rules": "^0.0.2"
+	}
+}
