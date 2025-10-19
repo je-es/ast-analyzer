@@ -465,7 +465,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "self can only be used in non-static struct methods",
+                        msg: "self can only be used in struct methods",
                     },
                 ],
             },
@@ -486,7 +486,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "self can only be used in non-static struct methods",
+                        msg: "self can only be used in struct methods",
                     }
                 ],
             },

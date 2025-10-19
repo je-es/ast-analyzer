@@ -578,7 +578,7 @@
 
             // Struct with different field types
             {
-                input       : 'def Person = struct { name: str; age: i32; active: bool }',
+                input       : 'def Person = struct { name: slice; age: i32; active: bool }',
                 success     : true,
                 diagnostics : [],
             },
@@ -606,7 +606,7 @@
 
             // Struct with optional field
             {
-                input       : 'def User = struct { name: str; email: ?[]u8 }',
+                input       : 'def User = struct { name: slice; email: ?[]u8 }',
                 success     : true,
                 diagnostics : [],
             },
@@ -665,7 +665,7 @@
 
             // Enum with complex variant types
             {
-                input       : 'def Result = enum { Ok: i32, Err: str }',
+                input       : 'def Result = enum { Ok: i32, Err: slice }',
                 success     : true,
                 diagnostics : [],
             },
@@ -1285,7 +1285,7 @@
                 input: `
                     def Result = enum {
                         Ok: struct { value: i32 },
-                        Err: struct { value: str }
+                        Err: struct { value: slice }
                     }
                 `,
                 success: true,
@@ -1901,7 +1901,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "Undefined identifier 'self' - can only be used in struct instance methods"
+                        msg: "self can only be used in struct methods"
                     }
                 ]
             },
@@ -1977,7 +1977,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "Undefined identifier 'self' - can only be used in struct instance methods"
+                        msg: "self can only be used in struct methods"
                     }
                 ]
             },
@@ -1997,7 +1997,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "Undefined identifier 'self' - can only be used in struct instance methods"
+                        msg: "self can only be used in struct methods"
                     }
                 ]
             },

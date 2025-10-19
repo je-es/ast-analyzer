@@ -269,13 +269,23 @@
 
         // ┌──────────────────────────────── HELP ──────────────────────────────┐
 
-            private getContextKey(diagnostic: Diagnostic): string {
-                return diagnostic.contextSpan
-                    ? `c:${diagnostic.contextSpan.start}-${diagnostic.contextSpan.end}`
-                    : 'no-context';
-            }
-
             private isMoreSpecific(d1: Diagnostic, d2: Diagnostic): boolean {
+                // Special case: For character literal errors, prefer TYPE_MISMATCH over ARITHMETIC_OVERFLOW
+                if (d1.code === DiagCode.TYPE_MISMATCH && d2.code === DiagCode.ARITHMETIC_OVERFLOW) {
+                    // Check if ARITHMETIC_OVERFLOW is about a character literal (mentions code point value)
+                    if (d2.msg.includes('Value') && d2.msg.includes('does not fit in type') && 
+                        (d2.msg.includes("'char'") || d2.msg.includes("'u8'"))) {
+                        return true; // Prefer TYPE_MISMATCH (d1)
+                    }
+                }
+                if (d1.code === DiagCode.ARITHMETIC_OVERFLOW && d2.code === DiagCode.TYPE_MISMATCH) {
+                    // Check if ARITHMETIC_OVERFLOW is about a character literal
+                    if (d1.msg.includes('Value') && d1.msg.includes('does not fit in type') && 
+                        (d1.msg.includes("'char'") || d1.msg.includes("'u8'"))) {
+                        return false; // Prefer TYPE_MISMATCH (d2)
+                    }
+                }
+
                 // Longer message usually means more context
                 if (d1.msg.length !== d2.msg.length) {
                     return d1.msg.length > d2.msg.length;
@@ -347,42 +357,65 @@
                 const target1 = d1.targetSpan ? `${d1.targetSpan.start}-${d1.targetSpan.end}` : 'no-target';
                 const target2 = d2.targetSpan ? `${d2.targetSpan.start}-${d2.targetSpan.end}` : 'no-target';
 
-                if (target1 !== target2) {
+                if(d1.code === 'TYPE_MISMATCH' && d2.code === 'TYPE_MISMATCH') {
                     return false;
                 }
+                if (target1 === target2) {
+                    // Same target span - definitely the same issue
 
-                // Extract identifier from message using more flexible patterns
-                const identifierPatterns = [
-                    /identifier '([^']+)'/i,
-                    /Symbol '([^']+)'/i,
-                    /'([^']+)' already imported/i,
-                    /'([^']+)' shadows use/i
-                ];
+                    // Extract identifier from message using more flexible patterns
+                    const identifierPatterns = [
+                        /identifier '([^']+)'/i,
+                        /Symbol '([^']+)'/i,
+                        /'([^']+)' already imported/i,
+                        /'([^']+)' shadows use/i
+                    ];
 
-                let id1: string | null = null;
-                let id2: string | null = null;
+                    let id1: string | null = null;
+                    let id2: string | null = null;
 
-                for (const pattern of identifierPatterns) {
-                    id1 = id1 || d1.msg.match(pattern)?.[1] || null;
-                    id2 = id2 || d2.msg.match(pattern)?.[1] || null;
+                    for (const pattern of identifierPatterns) {
+                        id1 = id1 || d1.msg.match(pattern)?.[1] || null;
+                        id2 = id2 || d2.msg.match(pattern)?.[1] || null;
+                    }
+
+                    // If both mention the same identifier, it's the same issue
+                    if (id1 && id2 && id1 === id2) {
+                        return true;
+                    }
+
+                    // Check for duplicate/shadowing patterns with same target
+                    const isDuplicateRelated = (code: DiagCode) =>
+                        code === DiagCode.DUPLICATE_SYMBOL ||
+                        code === DiagCode.USE_SHADOWING ||
+                        code === DiagCode.VARIABLE_SHADOWING ||
+                        code === DiagCode.FUNCTION_SHADOWING ||
+                        code === DiagCode.DEFINITION_SHADOWING ||
+                        code === DiagCode.PARAMETER_SHADOWING;
+
+                    if (isDuplicateRelated(d1.code) && isDuplicateRelated(d2.code)) {
+                        return true;
+                    }
+
+                    return true; // Same target = same issue by default
                 }
 
-                // If both mention the same identifier, it's the same issue
-                if (id1 && id2 && id1 === id2) {
-                    return true;
-                }
+                // **NEW: Check if they share the same context and are related errors**
+                const context1 = d1.contextSpan ? `${d1.contextSpan.start}-${d1.contextSpan.end}` : 'no-context';
+                const context2 = d2.contextSpan ? `${d2.contextSpan.start}-${d2.contextSpan.end}` : 'no-context';
 
-                // Check for duplicate/shadowing patterns with same target
-                const isDuplicateRelated = (code: DiagCode) =>
-                    code === DiagCode.DUPLICATE_SYMBOL ||
-                    code === DiagCode.USE_SHADOWING ||
-                    code === DiagCode.VARIABLE_SHADOWING ||
-                    code === DiagCode.FUNCTION_SHADOWING ||
-                    code === DiagCode.DEFINITION_SHADOWING ||
-                    code === DiagCode.PARAMETER_SHADOWING;
+                if (context1 === context2 && context1 !== 'no-context') {
+                    // Same context - check if errors are related
+                    const isTypeError = (code: DiagCode) =>
+                        code === DiagCode.TYPE_MISMATCH ||
+                        code === DiagCode.ARITHMETIC_OVERFLOW ||
+                        code === DiagCode.LITERAL_OVERFLOW ||
+                        code === DiagCode.CANNOT_INFER_TYPE;
 
-                if (isDuplicateRelated(d1.code) && isDuplicateRelated(d2.code)) {
-                    return true;
+                    // If both are type-related errors in the same context, treat as same issue
+                    if (isTypeError(d1.code) && isTypeError(d2.code)) {
+                        return true;
+                    }
                 }
 
                 return false;

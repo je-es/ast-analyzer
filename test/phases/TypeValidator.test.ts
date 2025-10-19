@@ -276,7 +276,7 @@
                 diagnostics: [
                     {
                         kind: 'error',
-                        msg: 'Array elements have incompatible types',
+                        msg: "Array element 1 has type 'bool' which is not compatible with target element type 'i32'",
                         code: 'TYPE_MISMATCH'
                     }
                 ]
@@ -391,8 +391,8 @@
                         cspan: { start: 0, end: 31 },
                         tspan: { start: 19, end: 30 },
                         kind: 'error',
-                        msg: "Cannot assign type '*i32' to variable of type '*mut i32'",
-                        code: 'TYPE_MISMATCH'
+                        msg: "Cannot assign immutable pointer to mutable pointer variable",
+                        code: 'MUTABILITY_MISMATCH'
                     }
                 ]
             },
@@ -486,29 +486,6 @@
     const PrefixUnary = {
 
         PrefixUnaryMustFails: [
-            // +int
-            {
-                input       : 'let a = +1; pub fn main() {}',
-                success     : true,
-                diagnostics : [],
-            },
-
-            // -int
-            {
-                input       : 'let a = -1; pub fn main() {}',
-                success     : true,
-                diagnostics : [],
-            },
-
-            // -int -> cint
-            {
-                input       : 'let a : cint = -1; pub fn main() {}',
-                success     : true,
-                diagnostics : [],
-            },
-        ],
-
-        PrefixUnaryMustSucceed: [
             // +bool
             {
                 input       : 'let a = +true; pub fn main() {}',
@@ -548,10 +525,33 @@
                         cspan       : { start: 0, end: 16 },
                         tspan       : { start: 13, end: 15 },
                         kind    : 'error',
-                        msg     : "Value -1 does not fit in type 'u8' (valid range: 0 to 255)",
-                        code    : "ARITHMETIC_OVERFLOW"
+                        msg     : "Cannot assign type 'cint' to variable of type 'u8'",
+                        code    : "TYPE_MISMATCH"
                     },
                 ],
+            },
+        ],
+
+        PrefixUnaryMustSucceed: [
+            // +int
+            {
+                input       : 'let a = +1; pub fn main() {}',
+                success     : true,
+                diagnostics : [],
+            },
+
+            // -int
+            {
+                input       : 'let a = -1; pub fn main() {}',
+                success     : true,
+                diagnostics : [],
+            },
+
+            // -int -> cint
+            {
+                input       : 'let a : cint = -1; pub fn main() {}',
+                success     : true,
+                diagnostics : [],
             },
         ]
 
@@ -672,8 +672,8 @@
                         cspan: { start: 35, end: 38 },
                         tspan: { start: 35, end: 36 },
                         kind: 'error',
-                        msg: "Cannot call value of non-function type",
-                        code: 'TYPE_MISMATCH'
+                        msg: "Cannot call value of non-function type. 'f' is a variable",
+                        code: 'NOT_A_FUNCTION'
                     }
                 ]
             },
@@ -687,8 +687,8 @@
                         cspan: { start: 28, end: 31 },
                         tspan: { start: 28, end: 29 },
                         kind: 'error',
-                        msg: "Cannot call value of non-function type",
-                        code: 'TYPE_MISMATCH'
+                        msg: "Cannot call value of non-function type. 'f' is a variable",
+                        code: 'NOT_A_FUNCTION'
                     }
                 ]
             },
@@ -3931,7 +3931,7 @@
                 diagnostics: [{
                     kind: 'error',
                     code: 'ANALYSIS_ERROR',
-                    msg: "Wildcard import requires an alias"
+                    msg: "Wildcard import requires an alias (use * as <name> from \"...\")"
                 }]
             },
 

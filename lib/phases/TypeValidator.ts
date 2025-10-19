@@ -6,13 +6,14 @@
 
 // ╔═══════════════════════════════════════ PACK ════════════════════════════════════════╗
 
-    import * as AST                 from '@je-es/ast';
-    import { AnalysisPhase }        from '../components/ContextTracker';
-    import { DiagCode }             from '../components/DiagnosticManager';
-    import { PhaseBase }            from '../interfaces/PhaseBase';
-    import { AnalysisConfig }       from '../ast-analyzer';
-    import { Scope, Symbol, SymbolKind, ScopeKind } from '../components/ScopeManager';
-    import { ExpressionEvaluator }  from '../components/ExpressionEvaluator';
+    import * as AST                     from '@je-es/ast';
+    import { AnalysisPhase }            from '../components/ContextTracker';
+    import { DiagCode }                 from '../components/DiagnosticManager';
+    import { PhaseBase }                from '../interfaces/PhaseBase';
+    import { AnalysisConfig }           from '../ast-analyzer';
+    import { Scope, Symbol, SymbolKind, ScopeKind } 
+                                        from '../components/ScopeManager';
+    import { ExpressionEvaluator }      from '../components/ExpressionEvaluator';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -370,6 +371,72 @@
                 this.validateLetStmt(letNode);
             }
 
+            private validateArrayLiteralWithTargetType(
+                initExpr: AST.ExprNode,
+                targetType: AST.TypeNode,
+                contextName: string
+            ): boolean {
+                // Only handle array literals
+                if (!initExpr.is('Primary')) return true;
+                const primary = initExpr.getPrimary();
+                if (!primary?.is('Literal')) return true;
+                const literal = primary.getLiteral();
+                if (literal?.kind !== 'Array') return true;
+
+                const elements = literal.value as AST.ExprNode[];
+
+                // Extract target array info
+                if (!targetType.isArray()) return true;
+                const targetArray = targetType.getArray()!;
+                const targetElementType = targetArray.target;
+
+                // CHECK ARRAY SIZE MISMATCH
+                if (targetArray.size) {
+                    const targetSize = this.ExpressionEvaluator.extractIntegerValue(targetArray.size);
+                    const sourceSize = elements.length;
+
+                    if (targetSize !== undefined && targetSize !== sourceSize) {
+                        const msg = sourceSize > targetSize
+                            ? `Array literal has more elements than the fixed array type`
+                            : `Array literal has fewer elements than the fixed array type`;
+
+                        this.reportError(
+                            DiagCode.ARRAY_SIZE_MISMATCH,
+                            msg,
+                            initExpr.span
+                        );
+                        return false; // Size mismatch - stop validation
+                    }
+                }
+
+                // Empty array is valid
+                if (elements.length === 0) return true;
+
+                // Validate ALL elements against target element type
+                for (let i = 0; i < elements.length; i++) {
+                    // Unified validation for each element
+                    if (!this.validateTypeAssignment(
+                        elements[i],
+                        targetElementType,
+                        `Array element ${i} in '${contextName}'`
+                    )) {
+                        // Error already reported, continue checking other elements
+                        continue;
+                    }
+
+                    const elemType = this.inferExpressionType(elements[i]);
+                    if (!elemType || !this.isTypeCompatible(targetElementType, elemType)) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Array element ${i} has type '${elemType?.toString() || 'unknown'}' which is not compatible with target element type '${targetElementType.toString()}'`,
+                            elements[i].span
+                        );
+                    }
+                }
+
+                return true;
+            }
+
             private validateLetStmt(letNode: AST.LetStmtNode): void {
                 this.log('symbols', `Type checking variable '${letNode.field.ident.name}'`);
 
@@ -416,26 +483,28 @@
                 let structTypeToValidate: AST.TypeNode | null = null;
                 let objectNodeToValidate: AST.ObjectNode | null = null;
 
-                if (letNode.field.type && letNode.field.initializer) {
-                    // Check for overflow before compatibility check
-                    this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
-
-                    let actualType = this.resolveIdentifierType(letNode.field.type);
-
-                    if (actualType.isStruct()) {
-                        if (letNode.field.initializer.is('Primary')) {
-                            const primary = letNode.field.initializer.getPrimary();
-                            if (primary && primary.is('Object')) {
-                                const obj = primary.getObject()!;
-                                structTypeToValidate = actualType;
-                                objectNodeToValidate = obj;
-                            }
-                        }
+                // Check for overflow before compatibility check
+                if (letNode.field.initializer) {
+                    if (letNode.field.type) {
+                        // Unified validation handles both character literals and overflow
+                        this.validateTypeAssignment(
+                            letNode.field.initializer,
+                            letNode.field.type,
+                            `Variable '${letNode.field.ident.name}'`
+                        );
+                        this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
+                    } else if (initType) {
+                        this.validateTypeAssignment(
+                            letNode.field.initializer,
+                            initType,
+                            `Variable '${letNode.field.ident.name}'`
+                        );
                     }
                 }
+
                 else if (letNode.field.initializer && !letNode.field.type) {
-                    if (letNode.field.initializer.is('Primary')) {
-                        const primary = letNode.field.initializer.getPrimary();
+                    if ((letNode.field.initializer! as AST.ExprNode).is('Primary')) {
+                        const primary = (letNode.field.initializer! as AST.ExprNode).getPrimary();
                         if (primary && primary.is('Object')) {
                             const obj = primary.getObject()!;
 
@@ -464,6 +533,19 @@
                 }
 
                 if (letNode.field.initializer) {
+                    // Special handling for array literals with explicit type
+                    if (letNode.field.type && letNode.field.type.isArray()) {
+                        this.validateArrayLiteralWithTargetType(
+                            letNode.field.initializer,
+                            letNode.field.type,
+                            letNode.field.ident.name
+                        );
+                        symbol.type = letNode.field.type;
+                        symbol.isTypeChecked = true;
+                        this.stats.typesInferred++;
+                        return;
+                    }
+
                     const initType = this.inferExpressionType(letNode.field.initializer);
 
                     if (initType) {
@@ -487,7 +569,7 @@
                                 this.reportError(
                                     DiagCode.TYPE_MISMATCH,
                                     `Cannot assign type '${initType.toString()}' to variable of type '${letNode.field.type.toString()}'`,
-                                    initType.span
+                                    letNode.field.initializer!.span
                                 );
                             }
                         }
@@ -499,16 +581,6 @@
                         letNode.field.span
                     );
                 }
-
-                // Check for overflow before compatibility check
-                if(letNode.field.initializer) {
-                    if(letNode.field.type) {
-                        this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
-                    } else if(initType) {
-                        this.validateValueFitsInType(letNode.field.initializer, initType);
-                    }
-                }
-
                 symbol.isTypeChecked = true;
             }
 
@@ -680,22 +752,34 @@
 
                 // Validate parameter visibility
                 if (paramNode.visibility.kind === 'Static') {
-                    this.reportError(  // Changed from reportWarning
+                    this.reportError(
                         DiagCode.INVALID_VISIBILITY,
                         `Parameter '${paramNode.ident.name}' cannot be 'static'`,
                         paramNode.ident.span
                     );
-                    return;  // Add early return to prevent further processing
+                    return;
                 } else if (paramNode.visibility.kind === 'Public') {
-                    this.reportError(  // Changed from reportWarning
+                    this.reportError(
                         DiagCode.INVALID_VISIBILITY,
                         `Parameter '${paramNode.ident.name}' cannot be 'public'`,
                         paramNode.ident.span
                     );
-                    return;  // Add early return to prevent further processing
+                    return;
                 }
 
                 if (paramNode.initializer) {
+                    // Special handling for array literals with explicit type
+                    if (paramNode.type && paramNode.type.isArray()) {
+                        this.validateArrayLiteralWithTargetType(
+                            paramNode.initializer,
+                            paramNode.type,
+                            paramNode.ident.name
+                        );
+                        paramSymbol.type = paramNode.type;
+                        paramSymbol.isTypeChecked = true;
+                        return;
+                    }
+
                     const initType = this.inferExpressionType(paramNode.initializer);
 
                     if (initType) {
@@ -704,7 +788,13 @@
                             paramSymbol.type = initType;
                             this.stats.typesInferred++;
                         } else {
-                            // Use shared helper for array validation
+                            // Unified validation
+                            this.validateTypeAssignment(
+                                paramNode.initializer,
+                                paramNode.type,
+                                `Parameter '${paramNode.ident.name}' default value`
+                            );
+
                             if (!this.validateArrayAssignment(
                                 paramNode.type,
                                 initType,
@@ -725,11 +815,8 @@
                         }
                     }
 
-                    // Check for overflow before compatibility check
                     if(paramNode.type) {
-                        this.validateValueFitsInType(paramNode.initializer, paramNode.type);
-                    } else if(initType) {
-                        this.validateValueFitsInType(paramNode.initializer, initType);
+                        this.validateValueFitsInType(paramNode.initializer, paramNode.type!);
                     }
                 }
 
@@ -887,13 +974,20 @@
                         }
                     }
 
-                    this.log('verbose', `Inferring return expression type: ${returnNode.value.kind}`);
-                    const returnType = this.inferExpressionType(returnNode.value);
-                    this.log('verbose', `Return type inferred: ${returnType?.toString() || 'null'}`);
+                    // Unified character literal validation for returns
+                    if (isInFunction && this.currentFunctionReturnType) {
+                        if (!this.validateTypeAssignment(
+                            returnNode.value,
+                            this.currentFunctionReturnType,
+                            'Return value'
+                        )) {
+                            return; // Error already reported
+                        }
+                    }
 
-                    // If type inference returned null AND errors were reported, stop here
+                    const returnType = this.inferExpressionType(returnNode.value);
+
                     if (!returnType && this.config.services.diagnosticManager.hasErrors()) {
-                        this.log('verbose', 'Type inference failed with errors, aborting return validation');
                         return;
                     }
 
@@ -1356,8 +1450,44 @@
                     case 'Float':
                         return AST.TypeNode.asComptimeFloat(literal.span, literal.value as string);
 
-                    case 'Character':
+                    case 'Character': {
+                        const charValue = literal.value as string;
+
+                        // Empty character literal - check context
+                        if (charValue.length === 0) {
+                            // Try to get expected type from context
+                            const expectedType = this.currentFunctionReturnType ||
+                                            this.getExpectedTypeFromContext();
+
+                            if (expectedType) {
+                                // Resolve identifier types to actual types
+                                const resolvedType = this.resolveIdentifierType(expectedType);
+
+                                // Check if context expects cpoint(u21)
+                                if (resolvedType.isUnsigned() && resolvedType.getWidth() === 21) {
+                                    return AST.TypeNode.asUnsigned(literal.span, 'u21', 21);
+                                }
+                                // Check if context expects char(u8)
+                                if (resolvedType.isUnsigned() && resolvedType.getWidth() === 8) {
+                                    return AST.TypeNode.asUnsigned(literal.span, 'u8', 8);
+                                }
+                            }
+
+                            // Default to char(u8) for empty literals
+                            return AST.TypeNode.asUnsigned(literal.span, 'u8', 8);
+                        }
+
+                        // Get Unicode code point
+                        const codePoint = charValue.codePointAt(0) || 0;
+
+                        // Non-ASCII (> 127) = cpoint(u21)
+                        if (codePoint > 127) {
+                            return AST.TypeNode.asUnsigned(literal.span, 'u21', 21);
+                        }
+
+                        // ASCII (≤ 127) = char(u8)
                         return AST.TypeNode.asUnsigned(literal.span, 'u8', 8);
+                    }
 
                     case 'Bool':
                         return AST.TypeNode.asBool(literal.span);
@@ -1376,6 +1506,31 @@
                 }
             }
 
+            // Helper method to get expected type from current context
+            private getExpectedTypeFromContext(): AST.TypeNode | null {
+                // Check if we're in a variable initialization
+                const currentDecl = this.config.services.contextTracker.getCurrentDeclaration();
+                if (currentDecl) {
+                    const symbol = this.config.services.scopeManager.getSymbol(currentDecl.symbolId);
+                    if (symbol && symbol.type) {
+                        // Resolve type aliases (char -> u8, cpoint -> u21)
+                        return this.resolveIdentifierType(symbol.type);
+                    }
+                }
+
+                // Check if we're in a parameter initialization
+                const exprContext = this.config.services.contextTracker.getCurrentExpressionContext();
+                if (exprContext && exprContext.relatedSymbol !== undefined) {
+                    const symbol = this.config.services.scopeManager.getSymbol(exprContext.relatedSymbol);
+                    if (symbol && symbol.type) {
+                        // Resolve type aliases (char -> u8, cpoint -> u21)
+                        return this.resolveIdentifierType(symbol.type);
+                    }
+                }
+
+                return null;
+            }
+
             private inferArrayLiteralType(literal: AST.LiteralNode): AST.TypeNode {
                 const elements = literal.value as AST.ExprNode[];
 
@@ -1390,7 +1545,13 @@
                     return AST.TypeNode.asArray(literal.span, AST.TypeNode.asUndefined(literal.span), sizeExpr);
                 }
 
+                // Validate subsequent elements against first element's type
                 for (let i = 1; i < elements.length; i++) {
+                    // Unified validation for array elements
+                    if (!this.validateTypeAssignment(elements[i], firstType, `Array element ${i}`)) {
+                        // Error already reported, but continue checking other elements
+                    }
+
                     const elemType = this.inferExpressionType(elements[i]);
                     if (!elemType || !this.isTypeCompatible(firstType, elemType)) {
                         this.reportError(
@@ -1630,7 +1791,7 @@
                 if (binary.kind === 'Assignment') {
                    // console.log('>>> ASSIGNMENT DETECTED in inferBinaryType');
                     this.validateAssignment(binary);
-                    
+
                     // Assignment expression evaluates to the right-hand side value
                     return this.inferExpressionType(binary.right);
                 }
@@ -2138,19 +2299,22 @@
                     const paramType = func.params[i];
                     const arg = call.args[i];
 
+                    // Unified character literal validation
+                    if (!this.validateTypeAssignment(arg, paramType, `Argument ${i + 1}`)) {
+                        continue; // Error already reported
+                    }
+
                     let argType = this.inferExpressionTypeWithContext(arg, paramType);
 
-                    // Don't allow undefined/null argument types to pass
                     if (!argType) {
                         this.reportError(
                             DiagCode.TYPE_INFERENCE_FAILED,
                             `Cannot infer type for argument ${i + 1}`,
                             arg.span
                         );
-                        continue; // Skip to next argument
+                        continue;
                     }
 
-                    // Check compatibility BEFORE reporting error
                     if (!this.isTypeCompatible(paramType, argType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
@@ -2847,12 +3011,12 @@
 
                                 // Validate field visibility
                                 if (field.visibility.kind === 'Static' && field.mutability.kind === 'Mutable') {
-                                    this.reportError(  // Changed from reportWarning
+                                    this.reportError(
                                         DiagCode.INVALID_VISIBILITY,
                                         `Struct field '${field.ident.name}' cannot be 'static'`,
                                         field.span
                                     );
-                                    continue;  // Skip this field and continue with next
+                                    continue;
                                 }
 
                                 // Resolve field type
@@ -2862,17 +3026,33 @@
 
                                 // Validate field initializer
                                 if (field.initializer) {
+                                    // Special handling for array literals with explicit type
+                                    if (field.type && field.type.isArray()) {
+                                        this.validateArrayLiteralWithTargetType(
+                                            field.initializer,
+                                            field.type,
+                                            field.ident.name
+                                        );
+                                        continue; // Skip to next field
+                                    }
+
                                     const initType = this.inferExpressionType(field.initializer);
 
                                     if (field.type && initType) {
-                                        // Use shared helper for array validation
+                                        // Unified validation
+                                        this.validateTypeAssignment(
+                                            field.initializer,
+                                            field.type,
+                                            `Field '${field.ident.name}' initializer`
+                                        );
+
                                         if (!this.validateArrayAssignment(
                                             field.type,
                                             initType,
                                             field.initializer.span,
                                             `Field '${field.ident.name}' initializer`
                                         )) {
-                                            continue; // Skip to next field
+                                            continue;
                                         }
 
                                         if (!this.isTypeCompatible(field.type, initType)) {
@@ -2886,18 +3066,12 @@
                                         field.type = initType;
                                     }
 
-                                    // Check for overflow before compatibility check
-                                    if(field.type) {
+                                    if (field.type) {
                                         this.validateValueFitsInType(field.initializer, field.type);
-                                    } else if(initType) {
-                                        this.validateValueFitsInType(field.initializer, initType);
                                     }
                                 }
                             } else {
                                 const method = member.getMethod()!;
-
-                                // Validate method visibility
-                                // Static methods are valid in structs
                                 this.validateFuncStmt(method);
                             }
                         }
@@ -2936,7 +3110,6 @@
                     }
                 }
 
-                // Build map of struct fields
                 const structFields = new Map<string, AST.FieldNode>();
                 for (const member of struct.members) {
                     if (member.isField()) {
@@ -2947,7 +3120,6 @@
 
                 const providedFields = new Set<string>();
 
-                // Validate each provided field
                 for (const prop of objNode.props) {
                     const fieldName = prop.key.name;
                     providedFields.add(fieldName);
@@ -2962,7 +3134,6 @@
                         continue;
                     }
 
-                    // Check if trying to initialize static field
                     if (structField.visibility.kind === 'Static') {
                         this.reportError(
                             DiagCode.INVALID_STATIC_ACCESS,
@@ -2972,8 +3143,16 @@
                         continue;
                     }
 
-                    // Validate field value type
+                    // Unified validation for field values
                     if (prop.val && structField.type) {
+                        if (!this.validateTypeAssignment(
+                            prop.val,
+                            structField.type,
+                            `Field '${fieldName}'`
+                        )) {
+                            continue; // Error already reported
+                        }
+
                         const valueType = this.inferExpressionType(prop.val);
 
                         if (valueType && !this.isTypeCompatible(structField.type, valueType)) {
@@ -2989,7 +3168,6 @@
                 // Check for missing required fields (skip static fields)
                 let hasMissingFields = false;
                 for (const [fieldName, field] of structFields) {
-                    // Skip static fields - they belong to the type, not instances
                     if (field.visibility.kind === 'Static') {
                         continue;
                     }
@@ -3326,6 +3504,88 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
+        // ┌──────────────────────── UNIFIED CHARACTER LITERAL VALIDATION ────────────────────────┐
+
+            /**
+             * Check if an expression is a character literal
+             */
+            private isCharacterLiteral(expr: AST.ExprNode): boolean {
+                if (!expr.is('Primary')) return false;
+                const primary = expr.getPrimary();
+                if (!primary?.is('Literal')) return false;
+                const literal = primary.getLiteral();
+                return literal?.kind === 'Character';
+            }
+
+            /**
+            * Universal character literal validation
+            * Validates that a character literal value fits in the target type
+            * Handles ALL contexts: variables, parameters, fields, arguments, returns, arrays
+            */
+            private validateCharacterLiteralCompatibility(
+                expr: AST.ExprNode,
+                targetType: AST.TypeNode,
+                context: string
+            ): boolean {
+                // Only validate character literals
+                if (!this.isCharacterLiteral(expr)) {
+                    return true; // Not a character literal, skip validation
+                }
+
+                const primary = expr.getPrimary()!;
+                const literal = primary.getLiteral()!;
+                const charValue = literal.value as string;
+
+                // Empty character - always valid
+                if (charValue.length === 0) return true;
+
+                const codePoint = charValue.codePointAt(0) || 0;
+                const resolvedType = this.resolveIdentifierType(targetType);
+
+                // Check if target is char (u8) - can only hold ASCII (0-255)
+                if (resolvedType.isUnsigned() && resolvedType.getWidth() === 8) {
+                    if (codePoint > 255) {
+                        this.reportError(
+                            DiagCode.ARITHMETIC_OVERFLOW,
+                            `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 255)`,
+                            expr.span
+                        );
+                        return false;
+                    }
+                }
+                // Check if target is cpoint (u21) - can hold up to 2,097,151
+                else if (resolvedType.isUnsigned() && resolvedType.getWidth() === 21) {
+                    if (codePoint > 0x1FFFFF) {
+                        this.reportError(
+                            DiagCode.ARITHMETIC_OVERFLOW,
+                            `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 2097151)`,
+                            expr.span
+                        );
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            private validateTypeAssignment(
+                sourceExpr: AST.ExprNode,
+                targetType: AST.TypeNode,
+                context: string
+            ): boolean {
+                // Only validate character literal compatibility (value range check)
+                if (!this.validateCharacterLiteralCompatibility(sourceExpr, targetType, context)) {
+                    return false; // Error already reported
+                }
+
+                // Don't do type compatibility check here - it's done by the caller
+                // (validateLetStmt, validateParameter, etc.)
+                return true;
+            }
+
+        // └──────────────────────────────────────────────────────────────────────┘
+
+
         // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             private isTypeCompatible(target: AST.TypeNode, source: AST.TypeNode): boolean {
@@ -3385,6 +3645,7 @@
                     return false;
                 }
 
+                // **THIS is where ALL narrowing logic should happen**
                 if (this.isNumericType(resolvedTarget) && this.isNumericType(resolvedSource)) {
                     return this.areNumericTypesCompatible(resolvedTarget, resolvedSource);
                 }
@@ -3750,21 +4011,32 @@
                     return false;
                 }
 
-                if (source.isComptimeInt() && target.isUnsigned()) {
-                    const prim = source.getPrimitive();
-                    const txtStr = prim?.text !== undefined ? String(prim.text) : '0';
-                    try {
-                        const value = BigInt(txtStr);
-                        if (value < BigInt(0)) {
+                // **CHECK COMPTIME FIRST - BEFORE ANY WIDTH CHECKS**
+                if (source.isComptimeInt() || source.isComptimeFloat()) {
+                    // Comptime integers to unsigned must be non-negative
+                    if (source.isComptimeInt() && target.isUnsigned()) {
+                        const prim = source.getPrimitive();
+                        const txtStr = prim?.text !== undefined ? String(prim.text) : '0';
+                        try {
+                            const value = BigInt(txtStr);
+                            if (value < BigInt(0)) {
+                                return false;
+                            }
+                        } catch {
                             return false;
                         }
-                    } catch {
-                        return false;
                     }
+                    
+                    // All other comptime conversions are allowed
+                    return true;
                 }
 
-                if (source.isComptimeInt() || source.isComptimeFloat()) {
-                    return true;
+                // **NOW CHECK NARROWING - ONLY FOR RUNTIME TYPES**
+                const targetWidth = target.getWidth() ?? 64;
+                const sourceWidth = source.getWidth() ?? 64;
+                
+                if (sourceWidth > targetWidth) {
+                    return false; // Narrowing not allowed
                 }
 
                 return true;

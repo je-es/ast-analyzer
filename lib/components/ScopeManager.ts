@@ -444,11 +444,20 @@
                 })
 
                 // types
-                this.createBuiltinSymbol('type', 'str', {
+                this.createBuiltinSymbol('type', 'slice', {
                     type: AST.TypeNode.asU8Array({start: 0, end: 0})
                 })
                 this.createBuiltinSymbol('type', 'char', {
                     type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u8', 8),
+                })
+                this.createBuiltinSymbol('type', 'cpoint', {
+                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u21', 21),
+                })
+                this.createBuiltinSymbol('type', 'usize', {
+                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64),
+                })
+                this.createBuiltinSymbol('type', 'isize', {
+                    type: AST.TypeNode.asSigned({start: 0, end: 0}, 'isize', 64),
                 })
             }
 
@@ -484,7 +493,7 @@
                     const symbol: Symbol = {
                         id: this.symbolIdGenerator.next(),
                         kind: SymbolKind.Definition,
-                        name: 'str',
+                        name: name,
                         contextSpan: { start: 0, end: 0 },
                         scope: this.globalScope.id,
                         visibility: { kind: 'Public' },
@@ -500,7 +509,7 @@
                         }
                     };
 
-                    this.globalScope.symbols.set('str', symbol);
+                    this.globalScope.symbols.set(name, symbol);
                     this.symbolTable.set(symbol.id, symbol);
 
                     return symbol;

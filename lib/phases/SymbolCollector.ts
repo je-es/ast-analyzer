@@ -761,6 +761,29 @@
                 const primary = expr.getPrimary();
                 if (!primary) return null;
 
+                // // Handle character literals
+                // if (primary.kind === 'Literal') {
+                //     const literal = primary.getLiteral();
+                //     if (literal && literal.kind === 'Character') {
+                //         const charValue = literal.value as string;
+
+                //         // Empty character literal - cannot infer without context
+                //         if (charValue.length === 0) {
+                //             return null; // Must be resolved with context in later phases
+                //         }
+
+                //         // Get Unicode code point
+                //         const codePoint = charValue.codePointAt(0) || 0;
+
+                //         // Non-ASCII = cpoint(u21), ASCII = char(u8)
+                //         if (codePoint > 255) {
+                //             return AST.TypeNode.asUnsigned(literal.span, 'u21', 21);
+                //         } else {
+                //             return AST.TypeNode.asUnsigned(literal.span, 'u8', 8);
+                //         }
+                //     }
+                // }
+
                 // Handle anonymous types: struct { x: i32 }, enum { A, B }
                 if (primary.kind === 'Type') {
                     return primary.getType();
@@ -1358,7 +1381,7 @@
                 if (!selfSymbol || !selfSymbol.metadata?.isSelf) {
                     this.reportError(
                         DiagCode.UNDEFINED_IDENTIFIER,
-                        "Undefined identifier 'self' - can only be used in struct instance methods",
+                        "self can only be used in struct methods",
                         span
                     );
                     return;

@@ -1,50 +1,19 @@
 - # Done
 
-    - add `defer` stmt.
+    ...
 
-    - add `anyerror` type.
+    - add : `cpoint` alias, refers to `u21`.
 
-    - add `throw` stmt.
+    - add : `isize` alias, refers to `i64`.
 
-    - add better return/throw context, for example what if func not have return stmt, but have throw stmt will execute always ?
+    - add : `usize` alias, refers to `u64`.
 
-    - refactor visibility/mutability interface.
+    - fix : `str` should be `slice`.
 
-    - change `error { }` to `errset { }`
-
-    - change `anyerror` to `err`
-
-    - add/fix visibility guards.
-
-    - add/fix self access/usage
-
-    - fix Type parser rules to use new primitive type `paren` instead of direct handling.
-
-    - add typeof/sizeof expr (we have '@typeof(..), ..')
-
-    - add `comptime` attr to let/fn/param/field.
-
-    - change tuple syntax from `()` to `.{}`.
-
-    - in use `use x. as ..` must report error `ident requierd after .`
-
-    - in expr `sizeof non-type-expr` must report error `type-expr requierd after sizeof`
-
-    - add type(expr) for cast (we have 'expr as type').
-
-    - evaluate standalone expression stmts too.
-
-    - add `use * as x` -> `*` = `all exported stmts` as new object, e.g. `ModuleExports { symbols ..}`.
-
-    - change `und` type to `und_t` , the expr is `und`.
-
-    - change `null` type to `null_t` , the expr is `null`.
-
-    - add `test` stmt (builtin-test-framework).
+    - fix : `''` must be more smart to handle/accept `char(u8)` and `cpoint(u21)`.
 
 - # Current
 
-    - add `project` lib with better caching for lsp.
 
 - # Later
 

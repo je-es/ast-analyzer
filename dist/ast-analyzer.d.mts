@@ -496,7 +496,6 @@ declare class DiagnosticManager {
     getAllErrors(): Diagnostic[];
     getAllWarnings(): Diagnostic[];
     getAllInfos(): Diagnostic[];
-    private getContextKey;
     private isMoreSpecific;
     private hasHigherPriority;
     private filterDuplicates;
@@ -737,6 +736,7 @@ declare class TypeValidator extends PhaseBase {
     private handleDefStmt;
     private validateDefStmt;
     private handleLetStmt;
+    private validateArrayLiteralWithTargetType;
     private validateLetStmt;
     private handleFuncStmt;
     private validateFuncStmt;
@@ -759,6 +759,7 @@ declare class TypeValidator extends PhaseBase {
     private isTypeType;
     private inferPrimaryType;
     private inferLiteralType;
+    private getExpectedTypeFromContext;
     private inferArrayLiteralType;
     private inferIdentifierType;
     private validateMethodCallContext;
@@ -799,6 +800,17 @@ declare class TypeValidator extends PhaseBase {
     private validateSwitchExhaustiveness;
     private validateArrayAssignment;
     private checkCircularTypeDependency;
+    /**
+     * Check if an expression is a character literal
+     */
+    private isCharacterLiteral;
+    /**
+    * Universal character literal validation
+    * Validates that a character literal value fits in the target type
+    * Handles ALL contexts: variables, parameters, fields, arguments, returns, arrays
+    */
+    private validateCharacterLiteralCompatibility;
+    private validateTypeAssignment;
     private isTypeCompatible;
     private isNumericType;
     private isAnyType;

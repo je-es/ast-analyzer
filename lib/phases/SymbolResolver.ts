@@ -1829,7 +1829,7 @@
                         // If neither, it's an error
                         this.reportError(
                             DiagCode.UNDEFINED_IDENTIFIER,
-                            "self can only be used in non-static struct methods",
+                            "self can only be used in struct methods",
                             ident.span
                         );
                         this.config.services.contextTracker.popContextSpan();

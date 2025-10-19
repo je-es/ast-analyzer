@@ -168,17 +168,6 @@
                     case 'Integer': {
                         try {
                             const value = BigInt(literal.value as string);
-
-                            // // Check overflow
-                            // if (value > ctx.maxIntValue || value < ctx.minIntValue) {
-                            //     this.reportError(
-                            //         DiagCode.ARITHMETIC_OVERFLOW,
-                            //         `Integer literal ${value} exceeds valid range [${ctx.minIntValue}, ${ctx.maxIntValue}]`,
-                            //         literal.span
-                            //     );
-                            //     return null;
-                            // }
-
                             return { value, type: 'int' };
                         } catch {
                             this.reportError(
@@ -221,6 +210,36 @@
                             );
                             return null;
                         }
+                    }
+
+                    case 'Character': {
+                        const charValue = literal.value as string;
+
+                        // Empty character - evaluate as 0 (NUL character)
+                        if (charValue.length === 0) {
+                            return { value: BigInt(0), type: 'int' };
+                        }
+
+                        // Get Unicode code point
+                        const codePoint = charValue.codePointAt(0) || 0;
+
+                        // Validate range based on inferred type
+                        if (codePoint > 127) {
+                            // Non-ASCII: must fit in u21 (max 2,097,151)
+                            if (codePoint > 0x1FFFFF) {
+                                this.reportError(
+                                    DiagCode.ARITHMETIC_OVERFLOW,
+                                    `Character code point ${codePoint} exceeds u21 maximum (2,097,151)`,
+                                    literal.span
+                                );
+                                return null;
+                            }
+                        } else {
+                            // ASCII: must fit in u8 (max 255, but we already know it's ≤ 127)
+                            // No additional validation needed
+                        }
+
+                        return { value: BigInt(codePoint), type: 'int' };
                     }
 
                     case 'Bool':

@@ -183,10 +183,17 @@ var DiagnosticManager = class {
   }
   // └────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── HELP ──────────────────────────────┐
-  getContextKey(diagnostic) {
-    return diagnostic.contextSpan ? `c:${diagnostic.contextSpan.start}-${diagnostic.contextSpan.end}` : "no-context";
-  }
   isMoreSpecific(d1, d2) {
+    if (d1.code === "TYPE_MISMATCH" /* TYPE_MISMATCH */ && d2.code === "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */) {
+      if (d2.msg.includes("Value") && d2.msg.includes("does not fit in type") && (d2.msg.includes("'char'") || d2.msg.includes("'u8'"))) {
+        return true;
+      }
+    }
+    if (d1.code === "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */ && d2.code === "TYPE_MISMATCH" /* TYPE_MISMATCH */) {
+      if (d1.msg.includes("Value") && d1.msg.includes("does not fit in type") && (d1.msg.includes("'char'") || d1.msg.includes("'u8'"))) {
+        return false;
+      }
+    }
     if (d1.msg.length !== d2.msg.length) {
       return d1.msg.length > d2.msg.length;
     }
@@ -233,27 +240,38 @@ var DiagnosticManager = class {
     var _a, _b;
     const target1 = d1.targetSpan ? `${d1.targetSpan.start}-${d1.targetSpan.end}` : "no-target";
     const target2 = d2.targetSpan ? `${d2.targetSpan.start}-${d2.targetSpan.end}` : "no-target";
-    if (target1 !== target2) {
+    if (d1.code === "TYPE_MISMATCH" && d2.code === "TYPE_MISMATCH") {
       return false;
     }
-    const identifierPatterns = [
-      /identifier '([^']+)'/i,
-      /Symbol '([^']+)'/i,
-      /'([^']+)' already imported/i,
-      /'([^']+)' shadows use/i
-    ];
-    let id1 = null;
-    let id2 = null;
-    for (const pattern of identifierPatterns) {
-      id1 = id1 || ((_a = d1.msg.match(pattern)) == null ? void 0 : _a[1]) || null;
-      id2 = id2 || ((_b = d2.msg.match(pattern)) == null ? void 0 : _b[1]) || null;
-    }
-    if (id1 && id2 && id1 === id2) {
+    if (target1 === target2) {
+      const identifierPatterns = [
+        /identifier '([^']+)'/i,
+        /Symbol '([^']+)'/i,
+        /'([^']+)' already imported/i,
+        /'([^']+)' shadows use/i
+      ];
+      let id1 = null;
+      let id2 = null;
+      for (const pattern of identifierPatterns) {
+        id1 = id1 || ((_a = d1.msg.match(pattern)) == null ? void 0 : _a[1]) || null;
+        id2 = id2 || ((_b = d2.msg.match(pattern)) == null ? void 0 : _b[1]) || null;
+      }
+      if (id1 && id2 && id1 === id2) {
+        return true;
+      }
+      const isDuplicateRelated = (code) => code === "DUPLICATE_SYMBOL" /* DUPLICATE_SYMBOL */ || code === "USE_SHADOWING" /* USE_SHADOWING */ || code === "VARIABLE_SHADOWING" /* VARIABLE_SHADOWING */ || code === "FUNCTION_SHADOWING" /* FUNCTION_SHADOWING */ || code === "DEFINITION_SHADOWING" /* DEFINITION_SHADOWING */ || code === "PARAMETER_SHADOWING" /* PARAMETER_SHADOWING */;
+      if (isDuplicateRelated(d1.code) && isDuplicateRelated(d2.code)) {
+        return true;
+      }
       return true;
     }
-    const isDuplicateRelated = (code) => code === "DUPLICATE_SYMBOL" /* DUPLICATE_SYMBOL */ || code === "USE_SHADOWING" /* USE_SHADOWING */ || code === "VARIABLE_SHADOWING" /* VARIABLE_SHADOWING */ || code === "FUNCTION_SHADOWING" /* FUNCTION_SHADOWING */ || code === "DEFINITION_SHADOWING" /* DEFINITION_SHADOWING */ || code === "PARAMETER_SHADOWING" /* PARAMETER_SHADOWING */;
-    if (isDuplicateRelated(d1.code) && isDuplicateRelated(d2.code)) {
-      return true;
+    const context1 = d1.contextSpan ? `${d1.contextSpan.start}-${d1.contextSpan.end}` : "no-context";
+    const context2 = d2.contextSpan ? `${d2.contextSpan.start}-${d2.contextSpan.end}` : "no-context";
+    if (context1 === context2 && context1 !== "no-context") {
+      const isTypeError = (code) => code === "TYPE_MISMATCH" /* TYPE_MISMATCH */ || code === "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */ || code === "LITERAL_OVERFLOW" /* LITERAL_OVERFLOW */ || code === "CANNOT_INFER_TYPE" /* CANNOT_INFER_TYPE */;
+      if (isTypeError(d1.code) && isTypeError(d2.code)) {
+        return true;
+      }
     }
     return false;
   }
@@ -1061,11 +1079,20 @@ var ScopeManager = class {
         AST.TypeNode.asU8Array({ start: 0, end: 0 })
       ], AST.TypeNode.asVoid({ start: 0, end: 0 }))
     });
-    this.createBuiltinSymbol("type", "str", {
+    this.createBuiltinSymbol("type", "slice", {
       type: AST.TypeNode.asU8Array({ start: 0, end: 0 })
     });
     this.createBuiltinSymbol("type", "char", {
       type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "u8", 8)
+    });
+    this.createBuiltinSymbol("type", "cpoint", {
+      type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "u21", 21)
+    });
+    this.createBuiltinSymbol("type", "usize", {
+      type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)
+    });
+    this.createBuiltinSymbol("type", "isize", {
+      type: AST.TypeNode.asSigned({ start: 0, end: 0 }, "isize", 64)
     });
   }
   createBuiltinSymbol(kind, name, options = { type: null }) {
@@ -1096,7 +1123,7 @@ var ScopeManager = class {
       const symbol = {
         id: this.symbolIdGenerator.next(),
         kind: "Definition" /* Definition */,
-        name: "str",
+        name,
         contextSpan: { start: 0, end: 0 },
         scope: this.globalScope.id,
         visibility: { kind: "Public" },
@@ -1111,7 +1138,7 @@ var ScopeManager = class {
           isBuiltin: true
         }
       };
-      this.globalScope.symbols.set("str", symbol);
+      this.globalScope.symbols.set(name, symbol);
       this.symbolTable.set(symbol.id, symbol);
       return symbol;
     }
@@ -2641,7 +2668,7 @@ var SymbolCollector = class extends PhaseBase {
     if (!selfSymbol || !((_b = selfSymbol.metadata) == null ? void 0 : _b.isSelf)) {
       this.reportError(
         "UNDEFINED_IDENTIFIER" /* UNDEFINED_IDENTIFIER */,
-        "Undefined identifier 'self' - can only be used in struct instance methods",
+        "self can only be used in struct methods",
         span
       );
       return;
@@ -4602,7 +4629,7 @@ var SymbolResolver = class extends PhaseBase {
         }
         this.reportError(
           "UNDEFINED_IDENTIFIER" /* UNDEFINED_IDENTIFIER */,
-          "self can only be used in non-static struct methods",
+          "self can only be used in struct methods",
           ident.span
         );
         this.config.services.contextTracker.popContextSpan();
@@ -5320,6 +5347,25 @@ var ExpressionEvaluator = class {
           );
           return null;
         }
+      }
+      case "Character": {
+        const charValue = literal.value;
+        if (charValue.length === 0) {
+          return { value: BigInt(0), type: "int" };
+        }
+        const codePoint = charValue.codePointAt(0) || 0;
+        if (codePoint > 127) {
+          if (codePoint > 2097151) {
+            this.reportError(
+              "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */,
+              `Character code point ${codePoint} exceeds u21 maximum (2,097,151)`,
+              literal.span
+            );
+            return null;
+          }
+        } else {
+        }
+        return { value: BigInt(codePoint), type: "int" };
       }
       case "Bool":
         return { value: literal.value, type: "bool" };
@@ -6155,6 +6201,50 @@ var TypeValidator = class extends PhaseBase {
   handleLetStmt(letNode, scope, moduleName) {
     this.validateLetStmt(letNode);
   }
+  // Add this new method in TypeValidator.ts (around line 3200, near validateArrayLiteralType)
+  validateArrayLiteralWithTargetType(initExpr, targetType, contextName) {
+    if (!initExpr.is("Primary")) return true;
+    const primary = initExpr.getPrimary();
+    if (!(primary == null ? void 0 : primary.is("Literal"))) return true;
+    const literal = primary.getLiteral();
+    if ((literal == null ? void 0 : literal.kind) !== "Array") return true;
+    const elements = literal.value;
+    if (!targetType.isArray()) return true;
+    const targetArray = targetType.getArray();
+    const targetElementType = targetArray.target;
+    if (targetArray.size) {
+      const targetSize = this.ExpressionEvaluator.extractIntegerValue(targetArray.size);
+      const sourceSize = elements.length;
+      if (targetSize !== void 0 && targetSize !== sourceSize) {
+        const msg = sourceSize > targetSize ? `Array literal has more elements than the fixed array type` : `Array literal has fewer elements than the fixed array type`;
+        this.reportError(
+          "ARRAY_SIZE_MISMATCH" /* ARRAY_SIZE_MISMATCH */,
+          msg,
+          initExpr.span
+        );
+        return false;
+      }
+    }
+    if (elements.length === 0) return true;
+    for (let i = 0; i < elements.length; i++) {
+      if (!this.validateTypeAssignment(
+        elements[i],
+        targetElementType,
+        `Array element ${i} in '${contextName}'`
+      )) {
+        continue;
+      }
+      const elemType = this.inferExpressionType(elements[i]);
+      if (!elemType || !this.isTypeCompatible(targetElementType, elemType)) {
+        this.reportError(
+          "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+          `Array element ${i} has type '${(elemType == null ? void 0 : elemType.toString()) || "unknown"}' which is not compatible with target element type '${targetElementType.toString()}'`,
+          elements[i].span
+        );
+      }
+    }
+    return true;
+  }
   validateLetStmt(letNode) {
     this.log("symbols", `Type checking variable '${letNode.field.ident.name}'`);
     const symbol = this.config.services.scopeManager.getSymbolInCurrentScope(letNode.field.ident.name);
@@ -6191,18 +6281,20 @@ var TypeValidator = class extends PhaseBase {
     }
     let structTypeToValidate = null;
     let objectNodeToValidate = null;
-    if (letNode.field.type && letNode.field.initializer) {
-      this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
-      let actualType = this.resolveIdentifierType(letNode.field.type);
-      if (actualType.isStruct()) {
-        if (letNode.field.initializer.is("Primary")) {
-          const primary = letNode.field.initializer.getPrimary();
-          if (primary && primary.is("Object")) {
-            const obj = primary.getObject();
-            structTypeToValidate = actualType;
-            objectNodeToValidate = obj;
-          }
-        }
+    if (letNode.field.initializer) {
+      if (letNode.field.type) {
+        this.validateTypeAssignment(
+          letNode.field.initializer,
+          letNode.field.type,
+          `Variable '${letNode.field.ident.name}'`
+        );
+        this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
+      } else if (initType) {
+        this.validateTypeAssignment(
+          letNode.field.initializer,
+          initType,
+          `Variable '${letNode.field.ident.name}'`
+        );
       }
     } else if (letNode.field.initializer && !letNode.field.type) {
       if (letNode.field.initializer.is("Primary")) {
@@ -6231,6 +6323,17 @@ var TypeValidator = class extends PhaseBase {
       return;
     }
     if (letNode.field.initializer) {
+      if (letNode.field.type && letNode.field.type.isArray()) {
+        this.validateArrayLiteralWithTargetType(
+          letNode.field.initializer,
+          letNode.field.type,
+          letNode.field.ident.name
+        );
+        symbol.type = letNode.field.type;
+        symbol.isTypeChecked = true;
+        this.stats.typesInferred++;
+        return;
+      }
       const initType2 = this.inferExpressionType(letNode.field.initializer);
       if (initType2) {
         if (!letNode.field.type) {
@@ -6251,7 +6354,7 @@ var TypeValidator = class extends PhaseBase {
             this.reportError(
               "TYPE_MISMATCH" /* TYPE_MISMATCH */,
               `Cannot assign type '${initType2.toString()}' to variable of type '${letNode.field.type.toString()}'`,
-              initType2.span
+              letNode.field.initializer.span
             );
           }
         }
@@ -6262,13 +6365,6 @@ var TypeValidator = class extends PhaseBase {
         `Variable '${letNode.field.ident.name}' requires explicit type or initializer`,
         letNode.field.span
       );
-    }
-    if (letNode.field.initializer) {
-      if (letNode.field.type) {
-        this.validateValueFitsInType(letNode.field.initializer, letNode.field.type);
-      } else if (initType) {
-        this.validateValueFitsInType(letNode.field.initializer, initType);
-      }
     }
     symbol.isTypeChecked = true;
   }
@@ -6394,7 +6490,6 @@ var TypeValidator = class extends PhaseBase {
     if (!paramSymbol) return;
     if (paramNode.visibility.kind === "Static") {
       this.reportError(
-        // Changed from reportWarning
         "INVALID_VISIBILITY" /* INVALID_VISIBILITY */,
         `Parameter '${paramNode.ident.name}' cannot be 'static'`,
         paramNode.ident.span
@@ -6402,7 +6497,6 @@ var TypeValidator = class extends PhaseBase {
       return;
     } else if (paramNode.visibility.kind === "Public") {
       this.reportError(
-        // Changed from reportWarning
         "INVALID_VISIBILITY" /* INVALID_VISIBILITY */,
         `Parameter '${paramNode.ident.name}' cannot be 'public'`,
         paramNode.ident.span
@@ -6410,6 +6504,16 @@ var TypeValidator = class extends PhaseBase {
       return;
     }
     if (paramNode.initializer) {
+      if (paramNode.type && paramNode.type.isArray()) {
+        this.validateArrayLiteralWithTargetType(
+          paramNode.initializer,
+          paramNode.type,
+          paramNode.ident.name
+        );
+        paramSymbol.type = paramNode.type;
+        paramSymbol.isTypeChecked = true;
+        return;
+      }
       const initType = this.inferExpressionType(paramNode.initializer);
       if (initType) {
         if (!paramNode.type) {
@@ -6417,6 +6521,11 @@ var TypeValidator = class extends PhaseBase {
           paramSymbol.type = initType;
           this.stats.typesInferred++;
         } else {
+          this.validateTypeAssignment(
+            paramNode.initializer,
+            paramNode.type,
+            `Parameter '${paramNode.ident.name}' default value`
+          );
           if (!this.validateArrayAssignment(
             paramNode.type,
             initType,
@@ -6437,8 +6546,6 @@ var TypeValidator = class extends PhaseBase {
       }
       if (paramNode.type) {
         this.validateValueFitsInType(paramNode.initializer, paramNode.type);
-      } else if (initType) {
-        this.validateValueFitsInType(paramNode.initializer, initType);
       }
     }
     paramSymbol.isTypeChecked = true;
@@ -6572,11 +6679,17 @@ var TypeValidator = class extends PhaseBase {
           return;
         }
       }
-      this.log("verbose", `Inferring return expression type: ${returnNode.value.kind}`);
+      if (isInFunction && this.currentFunctionReturnType) {
+        if (!this.validateTypeAssignment(
+          returnNode.value,
+          this.currentFunctionReturnType,
+          "Return value"
+        )) {
+          return;
+        }
+      }
       const returnType = this.inferExpressionType(returnNode.value);
-      this.log("verbose", `Return type inferred: ${(returnType == null ? void 0 : returnType.toString()) || "null"}`);
       if (!returnType && this.config.services.diagnosticManager.hasErrors()) {
-        this.log("verbose", "Type inference failed with errors, aborting return validation");
         return;
       }
       if (isInFunction && this.currentFunctionReturnType) {
@@ -6942,8 +7055,27 @@ var TypeValidator = class extends PhaseBase {
         return AST4.TypeNode.asComptimeInt(literal.span, literal.value);
       case "Float":
         return AST4.TypeNode.asComptimeFloat(literal.span, literal.value);
-      case "Character":
+      case "Character": {
+        const charValue = literal.value;
+        if (charValue.length === 0) {
+          const expectedType = this.currentFunctionReturnType || this.getExpectedTypeFromContext();
+          if (expectedType) {
+            const resolvedType = this.resolveIdentifierType(expectedType);
+            if (resolvedType.isUnsigned() && resolvedType.getWidth() === 21) {
+              return AST4.TypeNode.asUnsigned(literal.span, "u21", 21);
+            }
+            if (resolvedType.isUnsigned() && resolvedType.getWidth() === 8) {
+              return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+            }
+          }
+          return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+        }
+        const codePoint = charValue.codePointAt(0) || 0;
+        if (codePoint > 127) {
+          return AST4.TypeNode.asUnsigned(literal.span, "u21", 21);
+        }
         return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+      }
       case "Bool":
         return AST4.TypeNode.asBool(literal.span);
       case "Null":
@@ -6955,6 +7087,24 @@ var TypeValidator = class extends PhaseBase {
       default:
         return AST4.TypeNode.asUndefined(literal.span);
     }
+  }
+  // Helper method to get expected type from current context
+  getExpectedTypeFromContext() {
+    const currentDecl = this.config.services.contextTracker.getCurrentDeclaration();
+    if (currentDecl) {
+      const symbol = this.config.services.scopeManager.getSymbol(currentDecl.symbolId);
+      if (symbol && symbol.type) {
+        return this.resolveIdentifierType(symbol.type);
+      }
+    }
+    const exprContext = this.config.services.contextTracker.getCurrentExpressionContext();
+    if (exprContext && exprContext.relatedSymbol !== void 0) {
+      const symbol = this.config.services.scopeManager.getSymbol(exprContext.relatedSymbol);
+      if (symbol && symbol.type) {
+        return this.resolveIdentifierType(symbol.type);
+      }
+    }
+    return null;
   }
   inferArrayLiteralType(literal) {
     const elements = literal.value;
@@ -6968,6 +7118,8 @@ var TypeValidator = class extends PhaseBase {
       return AST4.TypeNode.asArray(literal.span, AST4.TypeNode.asUndefined(literal.span), sizeExpr2);
     }
     for (let i = 1; i < elements.length; i++) {
+      if (!this.validateTypeAssignment(elements[i], firstType, `Array element ${i}`)) {
+      }
       const elemType = this.inferExpressionType(elements[i]);
       if (!elemType || !this.isTypeCompatible(firstType, elemType)) {
         this.reportError(
@@ -7505,6 +7657,9 @@ var TypeValidator = class extends PhaseBase {
     for (let i = 0; i < func.params.length; i++) {
       const paramType = func.params[i];
       const arg = call.args[i];
+      if (!this.validateTypeAssignment(arg, paramType, `Argument ${i + 1}`)) {
+        continue;
+      }
       let argType = this.inferExpressionTypeWithContext(arg, paramType);
       if (!argType) {
         this.reportError(
@@ -8042,7 +8197,6 @@ var TypeValidator = class extends PhaseBase {
             const field = member.getField();
             if (field.visibility.kind === "Static" && field.mutability.kind === "Mutable") {
               this.reportError(
-                // Changed from reportWarning
                 "INVALID_VISIBILITY" /* INVALID_VISIBILITY */,
                 `Struct field '${field.ident.name}' cannot be 'static'`,
                 field.span
@@ -8053,8 +8207,21 @@ var TypeValidator = class extends PhaseBase {
               this.resolveTypeNode(field.type);
             }
             if (field.initializer) {
+              if (field.type && field.type.isArray()) {
+                this.validateArrayLiteralWithTargetType(
+                  field.initializer,
+                  field.type,
+                  field.ident.name
+                );
+                continue;
+              }
               const initType = this.inferExpressionType(field.initializer);
               if (field.type && initType) {
+                this.validateTypeAssignment(
+                  field.initializer,
+                  field.type,
+                  `Field '${field.ident.name}' initializer`
+                );
                 if (!this.validateArrayAssignment(
                   field.type,
                   initType,
@@ -8075,8 +8242,6 @@ var TypeValidator = class extends PhaseBase {
               }
               if (field.type) {
                 this.validateValueFitsInType(field.initializer, field.type);
-              } else if (initType) {
-                this.validateValueFitsInType(field.initializer, initType);
               }
             }
           } else {
@@ -8138,6 +8303,13 @@ var TypeValidator = class extends PhaseBase {
         continue;
       }
       if (prop.val && structField.type) {
+        if (!this.validateTypeAssignment(
+          prop.val,
+          structField.type,
+          `Field '${fieldName}'`
+        )) {
+          continue;
+        }
         const valueType = this.inferExpressionType(prop.val);
         if (valueType && !this.isTypeCompatible(structField.type, valueType)) {
           this.reportError(
@@ -8416,6 +8588,60 @@ var TypeValidator = class extends PhaseBase {
     } finally {
       this.circularTypeDetectionStack.delete(key);
     }
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────── UNIFIED CHARACTER LITERAL VALIDATION ────────────────────────┐
+  /**
+   * Check if an expression is a character literal
+   */
+  isCharacterLiteral(expr) {
+    if (!expr.is("Primary")) return false;
+    const primary = expr.getPrimary();
+    if (!(primary == null ? void 0 : primary.is("Literal"))) return false;
+    const literal = primary.getLiteral();
+    return (literal == null ? void 0 : literal.kind) === "Character";
+  }
+  /**
+  * Universal character literal validation
+  * Validates that a character literal value fits in the target type
+  * Handles ALL contexts: variables, parameters, fields, arguments, returns, arrays
+  */
+  validateCharacterLiteralCompatibility(expr, targetType, context) {
+    if (!this.isCharacterLiteral(expr)) {
+      return true;
+    }
+    const primary = expr.getPrimary();
+    const literal = primary.getLiteral();
+    const charValue = literal.value;
+    if (charValue.length === 0) return true;
+    const codePoint = charValue.codePointAt(0) || 0;
+    const resolvedType = this.resolveIdentifierType(targetType);
+    if (resolvedType.isUnsigned() && resolvedType.getWidth() === 8) {
+      if (codePoint > 255) {
+        this.reportError(
+          "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */,
+          `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 255)`,
+          expr.span
+        );
+        return false;
+      }
+    } else if (resolvedType.isUnsigned() && resolvedType.getWidth() === 21) {
+      if (codePoint > 2097151) {
+        this.reportError(
+          "ARITHMETIC_OVERFLOW" /* ARITHMETIC_OVERFLOW */,
+          `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 2097151)`,
+          expr.span
+        );
+        return false;
+      }
+    }
+    return true;
+  }
+  validateTypeAssignment(sourceExpr, targetType, context) {
+    if (!this.validateCharacterLiteralCompatibility(sourceExpr, targetType, context)) {
+      return false;
+    }
+    return true;
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
@@ -8722,23 +8948,29 @@ var TypeValidator = class extends PhaseBase {
     return true;
   }
   areNumericTypesCompatible(target, source) {
+    var _a, _b;
     if (source.isBool() || target.isBool()) {
       return false;
     }
-    if (source.isComptimeInt() && target.isUnsigned()) {
-      const prim = source.getPrimitive();
-      const txtStr = (prim == null ? void 0 : prim.text) !== void 0 ? String(prim.text) : "0";
-      try {
-        const value = BigInt(txtStr);
-        if (value < BigInt(0)) {
+    if (source.isComptimeInt() || source.isComptimeFloat()) {
+      if (source.isComptimeInt() && target.isUnsigned()) {
+        const prim = source.getPrimitive();
+        const txtStr = (prim == null ? void 0 : prim.text) !== void 0 ? String(prim.text) : "0";
+        try {
+          const value = BigInt(txtStr);
+          if (value < BigInt(0)) {
+            return false;
+          }
+        } catch (e) {
           return false;
         }
-      } catch (e) {
-        return false;
       }
-    }
-    if (source.isComptimeInt() || source.isComptimeFloat()) {
       return true;
+    }
+    const targetWidth = (_a = target.getWidth()) != null ? _a : 64;
+    const sourceWidth = (_b = source.getWidth()) != null ? _b : 64;
+    if (sourceWidth > targetWidth) {
+      return false;
     }
     return true;
   }

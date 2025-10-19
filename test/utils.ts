@@ -179,8 +179,8 @@
 
                 // TODO: improve this error code and msg (in SemanticValidator).
                 expect(result.success).toEqual(false);
-                expect(result.diagnostics[0].msg).toEqual("Invalid program structure");
-                expect(result.diagnostics[0].code).toEqual("ANALYSIS_ERROR");
+                expect(result.diagnostics[0].msg).toEqual("Program contains no modules");
+                expect(result.diagnostics[0].code).toEqual("MODULE_NOT_FOUND");
                 expect(result.diagnostics[0].kind).toEqual("error");
             });
         });
