@@ -11,7 +11,7 @@
     import { DiagCode }                 from '../components/DiagnosticManager';
     import { PhaseBase }                from '../interfaces/PhaseBase';
     import { AnalysisConfig }           from '../ast-analyzer';
-    import { Scope, Symbol, SymbolKind, ScopeKind } 
+    import { Scope, Symbol, SymbolKind, ScopeKind }
                                         from '../components/ScopeManager';
     import { ExpressionEvaluator }      from '../components/ExpressionEvaluator';
 
@@ -200,7 +200,35 @@
                     this.config.services.scopeManager.withScope(currentScope.id, () => {
                         this.config.services.contextTracker.withSavedState(() => {
                             this.config.services.contextTracker.setScope(currentScope.id);
-                            this.processStmt(stmt, currentScope, moduleName);
+                            this.processStmtByKind(stmt, {
+                                'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
+                                'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
+                                // 'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
+                                'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
+                                'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
+                                'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
+                                'Expression': (exprNode)  => {
+                                    const expr = stmt.getExpr()!;
+                                    if (expr.kind === 'Binary') {
+                                        const binary = expr.getBinary();
+
+                                        if (binary && binary.kind === 'Assignment') {
+                                            this.validateAssignment(binary);
+                                        }
+                                    }
+
+                                    this.inferExpressionType(expr);
+                                },
+
+                                // special cases
+                                'While'     : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'Do'        : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'For'       : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+
+                                'Return'    : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Defer'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Throw'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                            });
                         });
                     });
                 } catch (error) {
@@ -211,92 +239,6 @@
                     );
                 } finally {
                     this.config.services.contextTracker.popContextSpan();
-                }
-            }
-
-            private processStmt(stmt: AST.StmtNode, currentScope: Scope, moduleName?: string): void {
-                const nodeGetter = this.getNodeGetter(stmt);
-                if (!nodeGetter) {
-                    this.reportError(DiagCode.INTERNAL_ERROR, `Invalid AST: ${stmt.kind} node is null`);
-                    return;
-                }
-
-                switch (stmt.kind) {
-                        case 'Block':
-                            this.handleBlockStmt(stmt.getBlock()!, currentScope, moduleName);
-                            break;
-                        case 'Test':
-                            this.handleTestStmt(stmt.getTest()!, currentScope, moduleName);
-                            break;
-                        case 'Use':
-                            break;
-                        case 'Def':
-                            this.handleDefStmt(stmt.getDef()!, currentScope, moduleName);
-                            break;
-                        case 'Let':
-                            this.handleLetStmt(stmt.getLet()!, currentScope, moduleName);
-                            break;
-                        case 'Func':
-                            this.handleFuncStmt(stmt.getFunc()!, currentScope, moduleName);
-                            break;
-                        case 'While':
-                        case 'Do':
-                        case 'For':
-                            this.handleLoopStmt(stmt);
-                            break;
-                        case 'Return':
-                        case 'Defer':
-                        case 'Throw':
-                            this.handleControlflowStmt(stmt);
-                            break;
-                        case 'Expression': {
-                            const expr = stmt.getExpr()!;
-
-                           // console.log('>>> Processing Expression statement');
-                           // console.log('Expression kind:', expr.kind);
-
-                            if (expr.kind === 'Binary') {
-                                const binary = expr.getBinary();
-                               // console.log('Binary kind:', binary?.kind);
-
-                                if (binary && binary.kind === 'Assignment') {
-                                   // console.log('>>> Calling validateAssignment');
-                                   // console.log('Error count before validateAssignment:', this.config.services.diagnosticManager.length());
-
-                                    this.validateAssignment(binary);
-
-                                   // console.log('Error count after validateAssignment:', this.config.services.diagnosticManager.length());
-                                   // console.log('Has errors after validateAssignment?', this.config.services.diagnosticManager.hasErrors());
-                                }
-                            }
-
-                           // console.log('>>> Calling inferExpressionType');
-                            this.inferExpressionType(expr);
-
-                           // console.log('>>> Expression statement processing complete');
-                           // console.log('Final error count:', this.config.services.diagnosticManager.length());
-                           // console.log('Final has errors?', this.config.services.diagnosticManager.hasErrors());
-                            break;
-                        }
-                    }
-            }
-
-            private getNodeGetter(stmt: AST.StmtNode): (() => any) | null {
-                switch (stmt.kind) {
-                    case 'Def'          : return () => stmt.getDef();
-                    case 'Use'          : return () => stmt.getUse();
-                    case 'Let'          : return () => stmt.getLet();
-                    case 'Func'         : return () => stmt.getFunc();
-                    case 'Block'        : return () => stmt.getBlock();
-                    case 'Return'       :
-                    case 'Defer'        :
-                    case 'Throw'        : return () => stmt.getCtrlflow();
-                    case 'While'        :
-                    case 'Do'           :
-                    case 'For'          : return () => stmt.getLoop();
-                    case 'Expression'   : return () => stmt.getExpr();
-                    case 'Test'         : return () => stmt.getTest();
-                    default             : return null;
                 }
             }
 
@@ -428,7 +370,7 @@
                     if (!elemType || !this.isTypeCompatible(targetElementType, elemType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Array element ${i} has type '${elemType?.toString() || 'unknown'}' which is not compatible with target element type '${targetElementType.toString()}'`,
+                            `Array element ${i} has type '${elemType ? this.getTypeDisplayName(elemType!) : 'unknown'}' which is not compatible with target element type '${ this.getTypeDisplayName(targetElementType) }'`,
                             elements[i].span
                         );
                     }
@@ -565,10 +507,11 @@
                                 return;
                             }
 
-                            if (!this.isTypeCompatible(letNode.field.type, initType)) {
+                            // PASS SOURCE EXPRESSION for strict pointer checking
+                            if (!this.isTypeCompatible(letNode.field.type, initType, letNode.field.initializer)) {
                                 this.reportError(
                                     DiagCode.TYPE_MISMATCH,
-                                    `Cannot assign type '${initType.toString()}' to variable of type '${letNode.field.type.toString()}'`,
+                                    `Cannot assign type '${this.getTypeDisplayName(initType)}' to variable of type '${this.getTypeDisplayName(letNode.field.type)}'`,
                                     letNode.field.initializer!.span
                                 );
                             }
@@ -582,6 +525,13 @@
                     );
                 }
                 symbol.isTypeChecked = true;
+            }
+
+            private isPointerDereference(expr: AST.ExprNode): boolean {
+                if (!expr.is('Postfix')) return false;
+
+                const postfix = expr.getPostfix();
+                return postfix?.kind === 'Dereference';
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -805,10 +755,11 @@
                                 return;
                             }
 
-                            if (!this.isTypeCompatible(paramNode.type, initType)) {
+                            // PASS SOURCE EXPRESSION for strict pointer checking
+                            if (!this.isTypeCompatible(paramNode.type, initType, paramNode.initializer)) {
                                 this.reportError(
                                     DiagCode.TYPE_MISMATCH,
-                                    `Cannot assign type '${initType.toString()}' to parameter of type '${paramNode.type.toString()}'`,
+                                    `Cannot assign type '${this.getTypeDisplayName(initType)}' to parameter of type '${this.getTypeDisplayName(paramNode.type)}'`,
                                     paramNode.initializer.span
                                 );
                             }
@@ -893,7 +844,7 @@
                             const condType = this.inferExpressionType(loopStmt.expr);
 
                             if (loopStmt.kind === 'While' && condType && !condType.isBool()) {
-                                this.log('verbose', `Loop condition has type ${condType.toString()}, not bool`);
+                                this.log('verbose', `Loop condition has type ${this.getTypeDisplayName(condType)}, not bool`);
                             }
                         }
 
@@ -967,7 +918,7 @@
                         if (!functionReturnsType) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Cannot return a type as a value. Expected a value of type '${this.currentFunctionReturnType?.toString() || 'void'}', got type expression`,
+                                `Cannot return a type as a value. Expected a value of type '${this.currentFunctionReturnType ? this.getTypeDisplayName(this.currentFunctionReturnType!) : 'void'}', got type expression`,
                                 returnNode.value.span
                             );
                             return;
@@ -992,10 +943,11 @@
                     }
 
                     if (isInFunction && this.currentFunctionReturnType) {
-                        if (returnType && !this.isTypeCompatible(this.currentFunctionReturnType, returnType)) {
+                        // PASS SOURCE EXPRESSION for strict pointer checking
+                        if (returnType && !this.isTypeCompatible(this.currentFunctionReturnType, returnType, returnNode.value)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Return type '${returnType.toString()}' doesn't match function return type '${this.currentFunctionReturnType.toString()}'`,
+                                `Return type '${this.getTypeDisplayName(returnType)}' doesn't match function return type '${this.getTypeDisplayName(this.currentFunctionReturnType)}'`,
                                 returnNode.value.span
                             );
                         }
@@ -1010,7 +962,7 @@
                     if (isInFunction && this.currentFunctionReturnType && !this.currentFunctionReturnType.isVoid()) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Function expects return type '${this.currentFunctionReturnType.toString()}' but got void return`,
+                            `Function expects return type '${this.getTypeDisplayName(this.currentFunctionReturnType)}' but got void return`,
                             returnNode.span
                         );
                     } else if (!isInFunction) {
@@ -1023,7 +975,6 @@
                 }
             }
 
-            // Helper to detect constructor expressions
             private isConstructorExpression(expr: AST.ExprNode): boolean {
                 if (!expr.is('Primary')) return false;
                 const primary = expr.getPrimary();
@@ -1084,19 +1035,19 @@
 
                 // Validate the thrown expression
                 if (throwNode.value) {
+                    // TRY to infer type, but don't fail if we can't
                     const thrownType = this.inferExpressionType(throwNode.value);
 
+                    // For error members, we might not get a full type
+                    // Instead, validate directly using the expression
                     if (!thrownType) {
-                        this.reportError(
-                            DiagCode.TYPE_INFERENCE_FAILED,
-                            `Cannot infer type of thrown expression`,
-                            throwNode.value.span
-                        );
+                        // Can't infer type - validate using expression directly
+                        this.validateThrowExpression(throwNode.value, functionErrorType, throwNode.value.span);
                         return;
                     }
 
-                    // Validate that thrown type matches function's error type
-                    this.validateThrowType(thrownType, functionErrorType, throwNode.value.span);
+                    // Normal path: validate with both type and expression
+                    this.validateThrowType(thrownType, functionErrorType, throwNode.value, throwNode.value.span);
                 } else {
                     this.reportError(
                         DiagCode.ANALYSIS_ERROR,
@@ -1106,35 +1057,432 @@
                 }
             }
 
-            private validateThrowType(
-                thrownType: AST.TypeNode,
+            private validateThrowExpression(
+                throwExpr: AST.ExprNode,
                 functionErrorType: AST.TypeNode,
                 span: AST.Span
             ): void {
-                // CASE 1: Function has 'anyerror' - accepts ANY error type
-                if (this.isAnyErrorType(functionErrorType)) {
-                    if (!this.isErrorType(thrownType)) {
+                const funcSymbol = this.getCurrentFunctionSymbol();
+                const errorMode = funcSymbol?.metadata?.errorMode as string | undefined;
+
+                this.log('symbols', `Validating throw expression with error mode: ${errorMode || 'unknown'}`);
+
+                switch (errorMode) {
+                    case 'any-error':
+                        // For any-error mode, check if expression looks like an error
+                        // (member access on error set, identifier that might be error, etc.)
+                        if (!this.isErrorExpression(throwExpr)) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot throw non-error type. Expected error type`,
+                                span
+                            );
+                        }
+                        break;
+
+                    case 'err-ident':
+                    case 'err-group':
+                        // For specific error types, validate the expression matches
+                        if (!this.isValidErrorExpression(throwExpr, functionErrorType)) {
+                            this.reportError(
+                                DiagCode.THROW_TYPE_MISMATCH,
+                                `Thrown error does not match function error type '${this.getTypeDisplayName(functionErrorType)}'`,
+                                span
+                            );
+                        }
+                        break;
+
+                    case 'self-group':
+                        // For self-group, validate member access on selferr
+                        const errorName = this.extractErrorMemberName(throwExpr);
+                        const allowedErrors = funcSymbol?.metadata?.selfGroupErrors as string[] | undefined;
+
+                        if (!errorName) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot resolve error member from thrown expression`,
+                                span
+                            );
+                        } else if (!allowedErrors || !allowedErrors.includes(errorName)) {
+                            this.reportError(
+                                DiagCode.ERROR_MEMBER_NOT_FOUND,
+                                `Error '${errorName}' is not in function's error set [${allowedErrors?.join(', ') || ''}]`,
+                                span
+                            );
+                        }
+                        break;
+
+                    default:
+                        // Unknown mode - be lenient but warn
+                        this.log('verbose', `Unknown error mode in validateThrowExpression`);
+                        if (!this.isErrorExpression(throwExpr)) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot throw non-error type`,
+                                span
+                            );
+                        }
+                }
+            }
+
+            private isErrorExpression(expr: AST.ExprNode): boolean {
+                // Check for member access (ErrorSet.Member)
+                if (expr.is('Postfix')) {
+                    const postfix = expr.getPostfix();
+                    if (postfix?.kind === 'MemberAccess') {
+                        const memberAccess = postfix.getMemberAccess()!;
+
+                        // Check if base is an identifier that refers to an error set
+                        if (memberAccess.base.is('Primary')) {
+                            const primary = memberAccess.base.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const ident = primary.getIdent()!;
+                                const baseSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+
+                                // Check if it's an error set or selferr
+                                if (ident.name === 'selferr') return true;
+                                if (baseSymbol?.type?.isErrset()) return true;
+                                if (baseSymbol?.kind === SymbolKind.Definition && baseSymbol.type?.isErrset()) return true;
+                            }
+                        }
+                        return true; // Assume member access might be error
+                    }
+                }
+
+                // Check for direct identifier (might be error variable)
+                if (expr.is('Primary')) {
+                    const primary = expr.getPrimary();
+                    if (primary?.is('Ident')) {
+                        const ident = primary.getIdent()!;
+                        const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+
+                        // Check if it's an error variable or error type
+                        if (symbol?.kind === SymbolKind.Variable && symbol.type?.isErr()) return true;
+                        if (symbol?.kind === SymbolKind.Error) return true;
+                        if (symbol?.type?.isErrset()) return true;
+                    }
+                }
+
+                return false;
+            }
+
+            private isValidErrorExpression(expr: AST.ExprNode, expectedType: AST.TypeNode): boolean {
+                // For member access: ErrorSet.Member
+                if (expr.is('Postfix')) {
+                    const postfix = expr.getPostfix();
+                    if (postfix?.kind === 'MemberAccess') {
+                        const memberAccess = postfix.getMemberAccess()!;
+
+                        if (memberAccess.base.is('Primary')) {
+                            const primary = memberAccess.base.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const ident = primary.getIdent()!;
+
+                                // Check if base matches expected type name
+                                if (expectedType.isIdent()) {
+                                    const expectedIdent = expectedType.getIdent()!;
+                                    return ident.name === expectedIdent.name;
+                                }
+
+                                // Check if base symbol matches expected type
+                                const baseSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+                                if (baseSymbol?.type) {
+                                    const resolvedExpected = this.resolveIdentifierType(expectedType);
+                                    return this.isSameType(baseSymbol.type, resolvedExpected);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // For direct identifier: check if it matches expected error variable
+                if (expr.is('Primary')) {
+                    const primary = expr.getPrimary();
+                    if (primary?.is('Ident')) {
+                        const ident = primary.getIdent()!;
+
+                        // Check if identifier matches expected type name
+                        if (expectedType.isIdent()) {
+                            const expectedIdent = expectedType.getIdent()!;
+                            return ident.name === expectedIdent.name;
+                        }
+                    }
+                }
+
+                return true; // If we can't determine, be lenient
+            }
+
+            private validateThrowType(
+                thrownType: AST.TypeNode,
+                functionErrorType: AST.TypeNode,
+                throwExpr: AST.ExprNode,
+                span: AST.Span
+            ): void {
+                const funcSymbol = this.getCurrentFunctionSymbol();
+                const errorMode = funcSymbol?.metadata?.errorMode as string | undefined;
+
+                this.log('symbols', `Validating throw with error mode: ${errorMode || 'unknown'}`);
+
+                switch (errorMode) {
+                    case 'any-error':
+                        // Accept ANY error type
+                        if (!this.isErrorType(thrownType)) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot throw non-error type '${this.getTypeDisplayName(thrownType)}'. Expected error type`,
+                                span
+                            );
+                        }
+                        break;
+
+                    case 'err-ident':
+                    case 'err-group': {
+                        // Quick check: if throwing an identifier, check if it matches the function's expected error type
+                        if (throwExpr.is('Primary')) {
+                            const primary = throwExpr.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const thrownIdent = primary.getIdent()!.name;
+
+                                // Check if function expects an identifier type
+                                if (functionErrorType.isIdent()) {
+                                    const funcIdent = functionErrorType.getIdent()!.name;
+                                    if (thrownIdent === funcIdent) {
+                                        // Same identifier - always valid
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Extract what the thrown expression actually refers to
+                        let thrownErrorName: string = '';
+                        let thrownErrorSet: AST.TypeNode | null = null;
+
+                        // If throwing an identifier (like MyError), look up what it refers to
+                        if (throwExpr.is('Primary')) {
+                            const primary = throwExpr.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const thrownIdent = primary.getIdent()!.name;
+                                thrownErrorName = thrownIdent;
+
+                                // Look up the symbol to get what it actually refers to
+                                const thrownSymbol = this.config.services.scopeManager.lookupSymbol(thrownIdent);
+                                if (thrownSymbol && thrownSymbol.type) {
+                                    thrownErrorSet = this.resolveIdentifierType(thrownSymbol.type);
+                                }
+                            }
+                        }
+
+                        // If throwing a member access (like FileErrors.NotFound)
+                        if (throwExpr.is('Postfix')) {
+                            const postfix = throwExpr.getPostfix();
+                            if (postfix?.kind === 'MemberAccess') {
+                                const memberAccess = postfix.getMemberAccess()!;
+                                thrownErrorName = this.extractMemberName(memberAccess.target) || '';
+
+                                // Get the base type (FileErrors)
+                                const baseType = this.inferExpressionType(memberAccess.base);
+                                if (baseType) {
+                                    thrownErrorSet = this.resolveIdentifierType(baseType);
+                                }
+                            }
+                        }
+
+                        // Resolve the function's expected error type
+                        const resolvedFunctionError = this.resolveIdentifierType(functionErrorType);
+
+                        // CASE 1: Both are error sets - check if member is in set or if sets are identical
+                        if (thrownErrorSet?.isErrset() && resolvedFunctionError.isErrset()) {
+                            const thrownSet = thrownErrorSet.getErrset()!;
+                            const expectedSet = resolvedFunctionError.getErrset()!;
+
+                            // Check if thrown error set is the same as expected set
+                            if (this.isSameErrorType(thrownErrorSet, resolvedFunctionError)) {
+                                break;
+                            }
+
+                            // Check if the specific thrown member is in the expected set
+                            if (thrownErrorName) {
+                                const isMember = expectedSet.members.some(m => m.name === thrownErrorName);
+                                if (isMember) {
+                                    break;
+                                }
+                            }
+
+                            this.reportError(
+                                DiagCode.THROW_TYPE_MISMATCH,
+                                `Thrown error type '${thrownErrorName || this.getTypeDisplayName(thrownType)}' is not compatible with function error type '${this.getTypeDisplayName(functionErrorType)}'`,
+                                span
+                            );
+                            break;
+                        }
+
+                        // CASE 2: Function expects identifier that resolves to error set
+                        if (resolvedFunctionError.isErrset()) {
+                            const expectedSet = resolvedFunctionError.getErrset()!;
+
+                            // Check if thrown member is in the expected set
+                            if (thrownErrorName) {
+                                const isMember = expectedSet.members.some(m => m.name === thrownErrorName);
+                                if (isMember) {
+                                    break;
+                                }
+                            }
+
+                            this.reportError(
+                                DiagCode.THROW_TYPE_MISMATCH,
+                                `Thrown error type '${thrownErrorName || this.getTypeDisplayName(thrownType)}' is not compatible with function error type '${this.getTypeDisplayName(functionErrorType)}'`,
+                                span
+                            );
+                            break;
+                        }
+
+                        // If we get here, something didn't match - report error
                         this.reportError(
-                            DiagCode.TYPE_MISMATCH,
-                            `Cannot throw non-error type '${thrownType.toString()}'. Expected error type`,
+                            DiagCode.THROW_TYPE_MISMATCH,
+                            `Thrown error type '${thrownErrorName || this.getTypeDisplayName(thrownType)}' is not compatible with function error type '${this.getTypeDisplayName(functionErrorType)}'`,
                             span
                         );
+                        break;
                     }
-                    return;
+
+                    case 'self-group':
+                        // Extract error name from the EXPRESSION, not the type
+                        const errorName = this.extractErrorMemberName(throwExpr);
+                        const allowedErrors = funcSymbol?.metadata?.selfGroupErrors as string[] | undefined;
+
+                        if (!errorName) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot resolve error member from thrown expression`,
+                                span
+                            );
+                        } else if (!allowedErrors || !allowedErrors.includes(errorName)) {
+                            this.reportError(
+                                DiagCode.ERROR_MEMBER_NOT_FOUND,
+                                `Error '${errorName}' is not in function's error set [${allowedErrors?.join(', ') || ''}]`,
+                                span
+                            );
+                        }
+                        break;
+
+                    default:
+                        // No error mode (shouldn't happen) - fall back to original logic
+                        this.log('verbose', `Unknown error mode, falling back to legacy validation`);
+                        if (functionErrorType.isErr()) {
+                            if (!this.isErrorType(thrownType)) {
+                                this.reportError(
+                                    DiagCode.TYPE_MISMATCH,
+                                    `Cannot throw non-error type`,
+                                    span
+                                );
+                            }
+                        } else {
+                            const resolvedFunctionError = this.resolveIdentifierType(functionErrorType);
+                            const resolvedThrownType = this.resolveIdentifierType(thrownType);
+
+                            if (!this.isValidThrowType(resolvedThrownType, resolvedFunctionError, span)) {
+                                this.reportError(
+                                    DiagCode.THROW_TYPE_MISMATCH,
+                                    `Thrown error type is not compatible with function error type`,
+                                    span
+                                );
+                            }
+                        }
+                }
+            }
+
+            private isSameErrorType(type1: AST.TypeNode, type2: AST.TypeNode): boolean {
+                // Resolve both to their base forms
+                const resolved1 = this.resolveIdentifierType(type1);
+                const resolved2 = this.resolveIdentifierType(type2);
+
+                // CASE 1: Both are error sets - compare their members (IdentNode names)
+                if (resolved1.isErrset() && resolved2.isErrset()) {
+                    const set1 = resolved1.getErrset()!;
+                    const set2 = resolved2.getErrset()!;
+
+                    if (set1.members.length !== set2.members.length) return false;
+
+                    const members1 = new Set(set1.members.map(m => m.name));
+                    const members2 = new Set(set2.members.map(m => m.name));
+
+                    for (const member of members1) {
+                        if (!members2.has(member)) return false;
+                    }
+                    return true;
                 }
 
-                // CASE 2: Specific error type - resolve both sides
-                const resolvedFunctionError = this.resolveIdentifierType(functionErrorType);
-                const resolvedThrownType = this.resolveIdentifierType(thrownType);
-
-                // Check if throwing the right error type or member
-                if (!this.isValidThrowType(resolvedThrownType, resolvedFunctionError, span)) {
-                    this.reportError(
-                        DiagCode.THROW_TYPE_MISMATCH,
-                        `Thrown error type '${thrownType.toString()}' is not compatible with function error type '${functionErrorType.toString()}'`,
-                        span
-                    );
+                // CASE 2: Both are err primitives - compare their text values
+                if (resolved1.isErr() && resolved2.isErr()) {
+                    const prim1 = resolved1.getPrimitive();
+                    const prim2 = resolved2.getPrimitive();
+                    return prim1?.text === prim2?.text;
                 }
+
+                // CASE 3: Both are identifiers - compare names
+                if (resolved1.isIdent() && resolved2.isIdent()) {
+                    return resolved1.getIdent()!.name === resolved2.getIdent()!.name;
+                }
+
+                // Fall back to standard type comparison
+                return this.isSameType(resolved1, resolved2);
+            }
+
+            private getCurrentFunctionSymbol(): Symbol | null {
+                let currentScope = this.config.services.scopeManager.getCurrentScope();
+
+                while (currentScope && currentScope.kind !== ScopeKind.Function) {
+                    const parent = this.config.services.scopeManager.getScopeParent(currentScope.id);
+                    if (!parent) break;
+                    currentScope = parent;
+                }
+
+                if (!currentScope || currentScope.kind !== ScopeKind.Function) {
+                    return null;
+                }
+
+                const parentScope = this.config.services.scopeManager.getScopeParent(currentScope.id);
+                if (!parentScope) return null;
+
+                return parentScope.symbols.get(currentScope.name) || null;
+            }
+
+            private extractErrorMemberName(thrownExpr: AST.ExprNode): string | null {
+                // Handle direct identifier: throw IOError
+                if (thrownExpr.is('Primary')) {
+                    const primary = thrownExpr.getPrimary();
+                    if (primary?.is('Ident')) {
+                        return primary.getIdent()!.name;
+                    }
+                }
+
+                // Handle member access: throw selferr.IOError
+                if (thrownExpr.is('Postfix')) {
+                    const postfix = thrownExpr.getPostfix();
+                    if (postfix?.kind === 'MemberAccess') {
+                        const memberAccess = postfix.getMemberAccess()!;
+
+                        // Check if base is 'selferr'
+                        if (memberAccess.base.is('Primary')) {
+                            const primary = memberAccess.base.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const ident = primary.getIdent();
+                                if (ident?.name === 'selferr') {
+                                    // Extract the member name (the error variant)
+                                    if (memberAccess.target.is('Primary')) {
+                                        const targetPrimary = memberAccess.target.getPrimary();
+                                        if (targetPrimary?.is('Ident')) {
+                                            return targetPrimary.getIdent()!.name;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return null;
             }
 
             private getCurrentFunctionErrorType(): AST.TypeNode | null {
@@ -1253,7 +1601,7 @@
                             if (size === null) {
                                 this.reportError(
                                     DiagCode.INVALID_SIZEOF_TARGET,
-                                    `Cannot compute size of type '${targetType.toString()}'`,
+                                    `Cannot compute size of type '${this.getTypeDisplayName(targetType)}'`,
                                     sizeofNode.expr.span
                                 );
                                 return AST.TypeNode.asComptimeInt(expr.span, '0');
@@ -1368,7 +1716,6 @@
                 }
             }
 
-            // Helper method to check if expression is a type (not a value)
             private isTypeExpression(expr: AST.ExprNode): boolean {
                 if (expr.kind === 'Primary') {
                     const primary = expr.getPrimary();
@@ -1408,7 +1755,6 @@
                 return false;
             }
 
-            // Check if expression is the 'type' type
             private isTypeType(typeNode: AST.TypeNode): boolean {
                 if (!typeNode.isPrimitive()) return false;
                 const prim = typeNode.getPrimitive();
@@ -1506,7 +1852,6 @@
                 }
             }
 
-            // Helper method to get expected type from current context
             private getExpectedTypeFromContext(): AST.TypeNode | null {
                 // Check if we're in a variable initialization
                 const currentDecl = this.config.services.contextTracker.getCurrentDeclaration();
@@ -1785,11 +2130,8 @@
             private inferBinaryType(binary: AST.BinaryNode): AST.TypeNode | null {
                 if (!binary.left || !binary.right) return null;
 
-               // console.log('>>> inferBinaryType called, kind:', binary.kind);
-
                 // Handle Assignment FIRST, before inferring operand types
                 if (binary.kind === 'Assignment') {
-                   // console.log('>>> ASSIGNMENT DETECTED in inferBinaryType');
                     this.validateAssignment(binary);
 
                     // Assignment expression evaluates to the right-hand side value
@@ -1819,7 +2161,7 @@
                         if (!this.isNumericType(leftType) || !this.isNumericType(rightType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Cannot perform ${binary.kind} operation on non-numeric types '${leftType.toString()}' and '${rightType.toString()}'`,
+                                `Cannot perform ${binary.kind} operation on non-numeric types '${this.getTypeDisplayName(leftType)}' and '${this.getTypeDisplayName(rightType)}'`,
                                 binary.span
                             );
                             return null;
@@ -1834,7 +2176,7 @@
                         if (!this.isIntegerType(leftType) || !this.isIntegerType(rightType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Bitwise operations require integer types, got '${leftType.toString()}' and '${rightType.toString()}'`,
+                                `Bitwise operations require integer types, got '${this.getTypeDisplayName(leftType)}' and '${this.getTypeDisplayName(rightType)}'`,
                                 binary.span
                             );
                             return null;
@@ -1843,6 +2185,21 @@
 
                     case 'Equality':
                     case 'Relational':
+                        // NEW: Validate null comparison with non-optional types
+                        // Allow: optional types, null itself, and POINTERS to be compared with null
+                        if (leftType.isNull() && !rightType.isOptional() && !rightType.isNull() && !rightType.isPointer()) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot compare non-optional type '${this.getTypeDisplayName(rightType)}' with null`,
+                                binary.right.span
+                            );
+                        } else if (rightType.isNull() && !leftType.isOptional() && !leftType.isNull() && !leftType.isPointer()) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot compare non-optional type '${this.getTypeDisplayName(leftType)}' with null`,
+                                binary.left.span
+                            );
+                        }
                         return AST.TypeNode.asBool(binary.span);
 
                     case 'LogicalAnd':
@@ -1857,15 +2214,48 @@
             private validateAssignment(binary: AST.BinaryNode): void {
                 if (binary.kind !== 'Assignment') return;
 
-               // console.log('=== validateAssignment START ===');
                 this.stats.assignmentsValidated++;
 
+                // Check for assignment through immutable pointer dereference
+                if (binary.left.is('Postfix')) {
+                    const postfix = binary.left.getPostfix();
+                    if (postfix?.kind === 'Dereference') {
+                        const ptrExpr = postfix.getAsExprNode()!;
+                        const ptrType = this.inferExpressionType(ptrExpr);
+
+                        if (ptrType) {
+                            const normalizedPtrType = this.normalizeType(ptrType);
+
+                            if (normalizedPtrType.isPointer()) {
+                                const ptr = normalizedPtrType.getPointer()!;
+
+                                if (!ptr.mutable) {
+                                    this.reportError(
+                                        DiagCode.MUTABILITY_MISMATCH,
+                                        `Cannot assign through immutable pointer. Declare as '*mut T' to allow mutation`,
+                                        binary.left.span
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 const leftSymbol = this.extractSymbolFromExpression(binary.left);
-               // console.log('Assignment left symbol:', leftSymbol?.name, 'mutability:', leftSymbol?.mutability.kind);
-               // console.log('Left symbol kind:', leftSymbol?.kind);
-               // console.log('Left symbol scope:', leftSymbol?.scope);
 
                 if (leftSymbol) {
+                    // Check if trying to assign to static field
+                    if (leftSymbol.kind === SymbolKind.StructField &&
+                        leftSymbol.visibility.kind === 'Static') {
+                        this.reportError(
+                            DiagCode.MUTABILITY_MISMATCH,
+                            `Cannot assign to static field '${leftSymbol.name}'. Static fields are immutable.`,
+                            binary.left.span
+                        );
+                        return;
+                    }
+
                     // Check if the LEFT SIDE SYMBOL is immutable
                     if (leftSymbol.mutability.kind === 'Immutable') {
                         let symbolType = 'variable';
@@ -1875,34 +2265,24 @@
                             symbolType = 'field';
                         }
 
-                       // console.log('>>> MUTABILITY ERROR DETECTED <<<');
-                       // console.log('Symbol type:', symbolType);
-                       // console.log('Symbol name:', leftSymbol.name);
-                       // console.log('Error count before:', this.config.services.diagnosticManager.length());
-
                         this.reportError(
                             DiagCode.MUTABILITY_MISMATCH,
                             `Cannot assign to immutable ${symbolType} '${leftSymbol.name}'`,
                             binary.left.span
                         );
-
-                       // console.log('Error count after:', this.config.services.diagnosticManager.length());
-                       // console.log('Has errors?', this.config.services.diagnosticManager.hasErrors());
-                       // console.log('=== validateAssignment EARLY RETURN ===');
-                        return; // Stop here - don't continue validation
+                        return;
                     }
                 }
-
-               // console.log('Continuing with type compatibility check...');
 
                 // Type compatibility check
                 const leftType = this.inferExpressionType(binary.left);
                 const rightType = this.inferExpressionType(binary.right);
 
-                if (leftType && rightType && !this.isTypeCompatible(leftType, rightType)) {
+                // PASS SOURCE EXPRESSION for strict pointer checking
+                if (leftType && rightType && !this.isTypeCompatible(leftType, rightType, binary.right)) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        `Cannot assign type '${rightType.toString()}' to '${leftType.toString()}'`,
+                        `Cannot assign type '${this.getTypeDisplayName(rightType)}' to '${this.getTypeDisplayName(leftType)}'`,
                         binary.right.span
                     );
                 }
@@ -1911,23 +2291,6 @@
                 if (leftType) {
                     this.validateValueFitsInType(binary.right, leftType);
                 }
-
-               // console.log('=== validateAssignment END ===');
-            }
-
-            private resolveStructFieldSymbol(structType: AST.TypeNode, fieldName: string): Symbol | null {
-                const struct = structType.getStruct()!;
-                const scopeId = struct.metadata?.scopeId as number | undefined;
-
-                if (scopeId !== undefined) {
-                    try {
-                        const typeScope = this.config.services.scopeManager.getScope(scopeId);
-                        return typeScope.symbols.get(fieldName) || null;
-                    } catch {
-                        return null;
-                    }
-                }
-                return null;
             }
 
             // ===== PREFIX OPERATIONS =====
@@ -1942,7 +2305,7 @@
                         if (!this.isNumericType(exprType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Unary '${prefix.kind === 'UnaryMinus' ? '-' : '+'}' requires a numeric operand, got '${exprType.toString()}'`,
+                                `Unary '${prefix.kind === 'UnaryMinus' ? '-' : '+'}' requires a numeric operand, got '${this.getTypeDisplayName(exprType)}'`,
                                 prefix.expr.span
                             );
                             return null;
@@ -1968,7 +2331,7 @@
                         if (!this.isIntegerType(exprType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Bitwise not requires integer type, got '${exprType.toString()}'`,
+                                `Bitwise not requires integer type, got '${this.getTypeDisplayName(exprType)}'`,
                                 prefix.expr.span
                             );
                             return null;
@@ -1976,31 +2339,153 @@
                         return exprType;
 
                     case 'Reference':
-                    // Check if the referenced variable is mutable
-                    // &mut_var should produce *mut T, &immut_var should produce *T
-                    let isMutablePointer = false;
+                        // Check if expression is an lvalue before taking reference
+                        if (!this.isLValueExpression(prefix.expr)) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot take reference of non-lvalue expression`,
+                                prefix.expr.span
+                            );
+                            return null; // Stop type inference
+                        }
 
-                    // Extract the symbol being referenced
-                    if (prefix.expr.is('Primary')) {
-                        const primary = prefix.expr.getPrimary();
-                        if (primary?.is('Ident')) {
-                            const ident = primary.getIdent();
-                            if (ident) {
-                                const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
-                                // If the variable is mutable, create a mutable pointer
-                                if (symbol && symbol.mutability.kind === 'Mutable') {
-                                    isMutablePointer = true;
+                        let isMutablePointer = false;
+                        let resolvedType = exprType;
+
+                        // Extract the symbol being referenced
+                        if (prefix.expr.is('Primary')) {
+                            const primary = prefix.expr.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const ident = primary.getIdent();
+                                if (ident) {
+                                    const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+
+                                    if (symbol && symbol.mutability.kind === 'Mutable') {
+                                        isMutablePointer = true;
+                                    }
+
+                                    if (symbol && symbol.type) {
+                                        resolvedType = symbol.type;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    return AST.TypeNode.asPointer(prefix.span, exprType, isMutablePointer);
+                        const normalizedType = this.normalizeType(resolvedType);
+                        return AST.TypeNode.asPointer(prefix.span, normalizedType, isMutablePointer);
 
                     default:
                         return null;
                 }
             }
+
+            /**
+             * Checks if an expression is an lvalue (has a memory location that can be referenced).
+             *
+             * Lvalues include:
+             * - Variables: x, y, myVar
+             * - Dereferences: ptr.*, arr[0]
+             * - Member access: obj.field, self.x
+             *
+             * Non-lvalues (cannot take address):
+             * - Literals: 42, "hello", true
+             * - Function calls: foo()
+             * - Arithmetic: x + y
+             * - Temporary values
+             */
+            private isLValueExpression(expr: AST.ExprNode): boolean {
+                switch (expr.kind) {
+                    case 'Primary': {
+                        const primary = expr.getPrimary()!;
+
+                        switch (primary.kind) {
+                            case 'Ident':
+                                // Variables are lvalues
+                                return true;
+
+                            case 'Literal':
+                                // Literals are NOT lvalues
+                                return false;
+
+                            case 'Paren': {
+                                // Check the inner expression
+                                const paren = primary.getParen()!;
+                                return paren.source ? this.isLValueExpression(paren.source) : false;
+                            }
+
+                            default:
+                                // Tuples, objects, types are not lvalues
+                                return false;
+                        }
+                    }
+
+                    case 'Postfix': {
+                        const postfix = expr.getPostfix()!;
+
+                        switch (postfix.kind) {
+                            case 'Dereference':
+                                // ptr.* is an lvalue (points to memory)
+                                return true;
+
+                            case 'ArrayAccess':
+                                // arr[i] is an lvalue (array element has memory)
+                                return true;
+
+                            case 'MemberAccess':
+                                // obj.field is an lvalue (field has memory)
+                                return true;
+
+                            case 'Call':
+                                // Function calls are NOT lvalues (return temporary values)
+                                return false;
+
+                            case 'Increment':
+                            case 'Decrement':
+                                // Post-increment/decrement return the OLD value (temporary)
+                                return false;
+
+                            default:
+                                return false;
+                        }
+                    }
+
+                    case 'Prefix': {
+                        const prefix = expr.getPrefix()!;
+
+                        switch (prefix.kind) {
+                            case 'Reference':
+                                // &ptr is an lvalue
+                                return true;
+
+                            case 'Increment':
+                            case 'Decrement':
+                                // Pre-increment/decrement modify and return the lvalue
+                                return this.isLValueExpression(prefix.expr);
+
+                            default:
+                                // Unary +, -, !, ~ return temporary values
+                                return false;
+                        }
+                    }
+
+                    case 'Binary':
+                    case 'As':
+                    case 'Orelse':
+                    case 'Range':
+                    case 'Try':
+                    case 'Catch':
+                    case 'If':
+                    case 'Switch':
+                    case 'Typeof':
+                    case 'Sizeof':
+                        // All of these return temporary values, not lvalues
+                        return false;
+
+                    default:
+                        return false;
+                }
+            }
+
 
             // ===== POSTFIX OPERATIONS =====
 
@@ -2040,17 +2525,19 @@
                             return null;
                         }
 
-                        // Must be a pointer type
-                        if (!ptrType.isPointer()) {
+                        // Unwrap paren types before checking if pointer
+                        const unwrappedPtrType = this.unwrapParenType(ptrType);
+
+                        if (!unwrappedPtrType.isPointer()) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Cannot dereference non-pointer type '${ptrType.toString()}'`,
+                                `Cannot dereference non-pointer type '${this.getTypeDisplayName(ptrType)}'`,
                                 postfix.span
                             );
                             return null;
                         }
 
-                        return ptrType.getPointer()!.target;
+                        return unwrappedPtrType.getPointer()!.target;
 
                     default:
                         return null;
@@ -2224,7 +2711,7 @@
                     if (!this.isTypeCompatible(paramType, argType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Argument type '${argType.toString()}' is not compatible with parameter type '${paramType.toString()}'`,
+                            `Argument type '${this.getTypeDisplayName(argType)}' is not compatible with parameter type '${this.getTypeDisplayName(paramType)}'`,
                             arg.span
                         );
                     }
@@ -2318,7 +2805,7 @@
                     if (!this.isTypeCompatible(paramType, argType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Argument type '${argType.toString()}' is not assignable to parameter type '${paramType.toString()}'`,
+                            `Argument type '${this.getTypeDisplayName(argType)}' is not assignable to parameter type '${this.getTypeDisplayName(paramType)}'`,
                             arg.span
                         );
                     }
@@ -2356,7 +2843,7 @@
                 if (indexType && !this.isIntegerType(indexType)) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        `Array index must be integer type, got '${indexType.toString()}'`,
+                        `Array index must be integer type, got '${this.getTypeDisplayName(indexType)}'`,
                         access.index.span
                     );
                 }
@@ -2371,7 +2858,7 @@
 
                 this.reportError(
                     DiagCode.TYPE_MISMATCH,
-                    `Cannot index non-array type '${baseType.toString()}'`,
+                    `Cannot index non-array type '${this.getTypeDisplayName(baseType)}'`,
                     access.base.span
                 );
                 return null;
@@ -2388,7 +2875,7 @@
                         const ident = primary.getIdent()!;
 
                         if (ident?.name === 'self') {
-                            // In static methods, 'self.member' should error
+                            // ALLOW self in static methods, but validate member is static
                             if (this.currentIsStaticMethod && this.currentStructScope) {
                                 const memberName = this.extractMemberName(access.target);
                                 if (!memberName) {
@@ -2405,6 +2892,7 @@
 
                                 const isStaticMember = memberSymbol.visibility.kind === 'Static';
 
+                                // ❌ ERROR if accessing instance member via self in static method
                                 if (!isStaticMember) {
                                     const memberType = memberSymbol.kind === SymbolKind.Function ? 'method' : 'field';
                                     this.reportError(
@@ -2447,6 +2935,15 @@
                 // Continue with normal resolution...
                 let baseType = this.inferExpressionType(access.base);
                 if (!baseType) {
+                    return null;
+                }
+
+                if (access.optional && !baseType.isOptional()) {
+                    this.reportError(
+                        DiagCode.TYPE_MISMATCH,
+                        `Cannot use optional chaining on non-optional type '${this.getTypeDisplayName(baseType)}'`,
+                        access.span
+                    );
                     return null;
                 }
 
@@ -2564,18 +3061,6 @@
                 return memberSymbol.type;
             }
 
-            private getFunctionNode(methodName: string, structScope: Scope): AST.FuncStmtNode | null {
-                const methodSymbol = structScope.symbols.get(methodName);
-                if (!methodSymbol || methodSymbol.kind !== SymbolKind.Function) {
-                    return null;
-                }
-
-                // The function node should be stored in metadata or we need to look it up
-                // For now, we'll rely on the visibility info from the symbol's metadata
-                return methodSymbol.metadata?.funcNode as AST.FuncStmtNode | null || null;
-            }
-
-            // Detect if base is a type identifier (for static access)
             private isStaticMemberAccess(baseExpr: AST.ExprNode): boolean {
                 if (!baseExpr.is('Primary')) return false;
 
@@ -2591,7 +3076,6 @@
                 return symbol?.kind === SymbolKind.Definition;
             }
 
-            // Add static flag parameter
             private resolveMemberOnUnwrappedType(
                 type: AST.TypeNode,
                 access: AST.MemberAccessNode,
@@ -2619,7 +3103,6 @@
                 return null;
             }
 
-            // Enhanced struct member resolution with static checks
             private resolveStructMember(
                 structType: AST.TypeNode,
                 access: AST.MemberAccessNode,
@@ -2754,7 +3237,7 @@
                     if (!argType || !this.isTypeCompatible(paramType, argType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Argument type '${argType?.toString() ?? 'unknown'}' is not assignable to parameter type '${paramType.toString()}'`,
+                            `Argument type '${argType ? this.getTypeDisplayName(argType!) : 'unknown'}' is not assignable to parameter type '${this.getTypeDisplayName(paramType)}'`,
                             arg.span
                         );
                     }
@@ -2777,9 +3260,9 @@
                     }
                 }
 
-                // **FIXED**: Handle error types - use 'members' not 'variants'
+                // Handle error types - use 'members' not 'variants'
                 if (enumType.isErrset()) {
-                    const errorType = enumType.getError()!;
+                    const errorType = enumType.getErrset()!;
                     for (const member of errorType.members) {
                         if (member.name === memberName) {
                             // Return an identifier type for the error member
@@ -2805,7 +3288,7 @@
                 if (!this.canConvertTypes(sourceType, asNode.type)) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        `Cannot convert type '${sourceType.toString()}' to type '${asNode.type.toString()}'`,
+                        `Cannot convert type '${this.getTypeDisplayName(sourceType)}' to type '${this.getTypeDisplayName(asNode.type)}'`,
                         asNode.span
                     );
                 }
@@ -2820,19 +3303,47 @@
                 if (!leftType) return rightType;
                 if (!rightType) return leftType;
 
-                // Handle ?T ?? null -> T | null (union type)
+                // Handle ?T ?? something
                 if (leftType.isOptional()) {
-                    const unwrapped = leftType.getOptional()!.target;
+                    const unwrapped = leftType.getOptional()!.target; // T
 
-                    // If right side is null, return union of unwrapped type and null
+                    // CASE 1: ?T ?? null -> T | null
                     if (rightType.isNull()) {
-                        const result = AST.TypeNode.asUnion(orelse.span, [unwrapped, rightType]);
-                        return result;
+                        return AST.TypeNode.asUnion(orelse.span, [unwrapped, rightType]);
                     }
 
-                    return unwrapped;
+                    // CASE 2: ?T ?? ?U -> ?T (keeps leftType as-is)
+                    // Example: ?i32 ?? ?i32 = ?i32
+                    if (rightType.isOptional()) {
+                        const rightUnwrapped = rightType.getOptional()!.target;
+
+                        // Validate that T and U are compatible
+                        if (!this.isTypeCompatible(unwrapped, rightUnwrapped)) {
+                            this.reportError(
+                                DiagCode.TYPE_MISMATCH,
+                                `Cannot use type '${this.getTypeDisplayName(rightType)}' as fallback for '${this.getTypeDisplayName(leftType)}'`,
+                                orelse.right.span
+                            );
+                        }
+
+                        // Return the optional type (left side takes precedence)
+                        return leftType; // ?T
+                    }
+
+                    // CASE 3: ?T ?? T -> T (unwrapped)
+                    // Example: ?i32 ?? 0 = i32
+                    if (!this.isTypeCompatible(unwrapped, rightType)) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Cannot use type '${this.getTypeDisplayName(rightType)}' as fallback for '${this.getTypeDisplayName(leftType)}'`,
+                            orelse.right.span
+                        );
+                    }
+
+                    return unwrapped; // T
                 }
 
+                // Left is not optional, just return it
                 return leftType;
             }
 
@@ -2842,7 +3353,7 @@
                     if (leftType && !this.isIntegerType(leftType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Range start must be integer type, got '${leftType.toString()}'`,
+                            `Range start must be integer type, got '${this.getTypeDisplayName(leftType)}'`,
                             range.leftExpr.span
                         );
                     }
@@ -2853,7 +3364,7 @@
                     if (rightType && !this.isIntegerType(rightType)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            `Range end must be integer type, got '${rightType.toString()}'`,
+                            `Range end must be integer type, got '${this.getTypeDisplayName(rightType)}'`,
                             range.rightExpr.span
                         );
                     }
@@ -2886,7 +3397,7 @@
             private inferIfType(ifNode: AST.IfNode): AST.TypeNode | null {
                 const condType = this.inferExpressionType(ifNode.condExpr);
                 if (condType && !condType.isBool()) {
-                    this.log('verbose', `If condition has type ${condType.toString()}, expected bool`);
+                    this.log('verbose', `If condition has type ${this.getTypeDisplayName(condType)}, expected bool`);
                 }
 
                 const exprScope = this.config.services.scopeManager.findChildScopeByName('expr', ScopeKind.Expression);
@@ -3055,10 +3566,11 @@
                                             continue;
                                         }
 
-                                        if (!this.isTypeCompatible(field.type, initType)) {
+                                        // PASS SOURCE EXPRESSION for strict pointer checking
+                                        if (!this.isTypeCompatible(field.type, initType, field.initializer)) {
                                             this.reportError(
                                                 DiagCode.TYPE_MISMATCH,
-                                                `Field '${field.ident.name}' initializer type '${initType.toString()}' doesn't match field type '${field.type.toString()}'`,
+                                                `Field '${field.ident.name}' initializer type '${this.getTypeDisplayName(initType)}' doesn't match field type '${this.getTypeDisplayName(field.type)}'`,
                                                 field.initializer.span
                                             );
                                         }
@@ -3158,7 +3670,7 @@
                         if (valueType && !this.isTypeCompatible(structField.type, valueType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Field '${fieldName}' expects type '${structField.type.toString()}' but got '${valueType.toString()}'`,
+                                `Field '${fieldName}' expects type '${this.getTypeDisplayName(structField.type)}' but got '${this.getTypeDisplayName(valueType)}'`,
                                 prop.val.span
                             );
                         }
@@ -3204,23 +3716,28 @@
                 // Track errors before evaluation
                 const errorCountBefore = this.config.services.diagnosticManager.length();
 
-                // Try to evaluate the expression at compile-time
+                // Try to evaluate the size expression
+                // This handles:
+                // - Literals: [10]i32
+                // - Function calls: [get_size()]i32  (comptime functions only)
+                // - Binary operations: [base() + base()]i32
+                // - Arithmetic: [5 + 5]i32
+                // etc.
+
                 const comptimeValue = this.ExpressionEvaluator.evaluateComptimeExpression(sizeExpr);
 
-                // Check if evaluation added errors (type errors, overflow, etc.)
+                // Check if evaluation added errors
                 const errorCountAfter = this.config.services.diagnosticManager.length();
                 const evaluationFailed = errorCountAfter > errorCountBefore;
 
-                // If evaluation failed (added errors), stop here - don't add more errors
                 if (evaluationFailed) {
-                    return;
+                    return; // Errors already reported with full context
                 }
 
-                // If evaluation returned null but didn't report errors, it's not a constant expression
                 if (comptimeValue === null) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        'Array size must be a compile-time constant expression',
+                        'Array size must be a compile-time constant expression. Use literals, comptime functions, or compile-time arithmetic.',
                         sizeExpr.span
                     );
                     return;
@@ -3246,6 +3763,8 @@
                     );
                     return;
                 }
+
+                // SUCCESS: Size is valid
             }
 
             private validateSwitchExhaustiveness(switchNode: AST.SwitchNode): void {
@@ -3506,9 +4025,6 @@
 
         // ┌──────────────────────── UNIFIED CHARACTER LITERAL VALIDATION ────────────────────────┐
 
-            /**
-             * Check if an expression is a character literal
-             */
             private isCharacterLiteral(expr: AST.ExprNode): boolean {
                 if (!expr.is('Primary')) return false;
                 const primary = expr.getPrimary();
@@ -3517,11 +4033,6 @@
                 return literal?.kind === 'Character';
             }
 
-            /**
-            * Universal character literal validation
-            * Validates that a character literal value fits in the target type
-            * Handles ALL contexts: variables, parameters, fields, arguments, returns, arrays
-            */
             private validateCharacterLiteralCompatibility(
                 expr: AST.ExprNode,
                 targetType: AST.TypeNode,
@@ -3547,7 +4058,7 @@
                     if (codePoint > 255) {
                         this.reportError(
                             DiagCode.ARITHMETIC_OVERFLOW,
-                            `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 255)`,
+                            `Value ${codePoint} does not fit in type '${this.getTypeDisplayName(targetType)}' (valid range: 0 to 255)`,
                             expr.span
                         );
                         return false;
@@ -3558,7 +4069,7 @@
                     if (codePoint > 0x1FFFFF) {
                         this.reportError(
                             DiagCode.ARITHMETIC_OVERFLOW,
-                            `Value ${codePoint} does not fit in type '${targetType.toString()}' (valid range: 0 to 2097151)`,
+                            `Value ${codePoint} does not fit in type '${this.getTypeDisplayName(targetType)}' (valid range: 0 to 2097151)`,
                             expr.span
                         );
                         return false;
@@ -3583,30 +4094,50 @@
                 return true;
             }
 
+            private unwrapParenType(type: AST.TypeNode): AST.TypeNode {
+                while (type.isParen()) {
+                    type = type.getParen()!.type;
+                }
+                return type;
+            }
+
         // └──────────────────────────────────────────────────────────────────────┘
 
 
         // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
-            private isTypeCompatible(target: AST.TypeNode, source: AST.TypeNode): boolean {
+            private isTypeCompatible(target: AST.TypeNode, source: AST.TypeNode, sourceExpr?: AST.ExprNode): boolean {
                 this.stats.compatibilityChecks++;
 
-                // any accepts everything
-                if (this.isAnyType(target)) return true;
+                // ⚠️ STRICT MODE: Pointer dereference requires EXACT type match
+                if (sourceExpr && this.isPointerDereference(sourceExpr)) {
+                    const normalizedTarget = this.normalizeType(target);
+                    const normalizedSource = this.normalizeType(source);
 
-                // anyerror accepts any error type or error member
-                if (this.isAnyErrorType(target)) {
-                    // Accept any error type or error member identifier
-                    if (this.isErrorType(source)) {
+                    // For pointer dereference, only allow exact type match (no widening)
+                    if (!this.isSameType(normalizedTarget, normalizedSource)) {
+                        return false;
+                    }
+                    // If types match exactly, continue with normal validation
+                }
+
+                // NORMALIZE BOTH TYPES FIRST - this handles all paren unwrapping
+                const normalizedTarget = this.normalizeType(target);
+                const normalizedSource = this.normalizeType(source);
+
+                // any accepts everything
+                if (this.isAnyType(normalizedTarget)) return true;
+
+                // err accepts any error type or error member
+                if (normalizedTarget.isErr()) {
+                    if (this.isErrorType(normalizedSource)) {
                         return true;
                     }
 
-                    // Check if source is an error member (identifier that resolves to error)
-                    if (source.isIdent()) {
-                        const sourceIdent = source.getIdent()!;
+                    if (normalizedSource.isIdent()) {
+                        const sourceIdent = normalizedSource.getIdent()!;
                         const sourceSymbol = this.config.services.scopeManager.lookupSymbol(sourceIdent.name);
 
-                        // If it's an error member, it's compatible with anyerror
                         if (sourceSymbol && sourceSymbol.kind === SymbolKind.Error) {
                             return true;
                         }
@@ -3615,20 +4146,18 @@
                     return false;
                 }
 
-                if (this.isSameType(target, source)) return true;
+                if (this.isSameType(normalizedTarget, normalizedSource)) return true;
 
-                const resolvedTarget = this.resolveIdentifierType(target);
-                const resolvedSource = this.resolveIdentifierType(source);
+                const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
+                const resolvedSource = this.resolveIdentifierType(normalizedSource);
 
                 if (this.isSameType(resolvedTarget, resolvedSource)) return true;
 
-                // Handle error member to anyerror conversion
-                if (this.isAnyErrorType(resolvedTarget)) {
+                if (resolvedTarget.isErr()) {
                     if (this.isErrorType(resolvedSource)) {
                         return true;
                     }
 
-                    // Check if resolved source is an error member
                     if (resolvedSource.isIdent()) {
                         const ident = resolvedSource.getIdent()!;
                         const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -3645,17 +4174,14 @@
                     return false;
                 }
 
-                // **THIS is where ALL narrowing logic should happen**
                 if (this.isNumericType(resolvedTarget) && this.isNumericType(resolvedSource)) {
                     return this.areNumericTypesCompatible(resolvedTarget, resolvedSource);
                 }
 
-                // Handle union-to-union compatibility
                 if (resolvedTarget.isUnion() && resolvedSource.isUnion()) {
                     const targetUnion = resolvedTarget.getUnion()!;
                     const sourceUnion = resolvedSource.getUnion()!;
 
-                    // Every type in source must be compatible with at least one type in target
                     return sourceUnion.types.every((sourceType: AST.TypeNode) =>
                         targetUnion.types.some((targetType: AST.TypeNode) =>
                             this.isTypeCompatible(targetType, sourceType)
@@ -3697,12 +4223,9 @@
                     return unionType.types.some((type: AST.TypeNode) => this.isTypeCompatible(type, source));
                 }
 
-                // Handle optional-to-union conversion
-                // ?T is compatible with T | null
                 if (resolvedSource.isOptional()) {
                     const sourceInner = resolvedSource.getOptional()!.target;
 
-                    // If target is union, check if it contains both the inner type and null
                     if (resolvedTarget.isUnion()) {
                         const unionType = resolvedTarget.getUnion()!;
                         const hasInnerType = unionType.types.some((t: AST.TypeNode) =>
@@ -3743,26 +4266,18 @@
                 return elemType.isUnsigned() && elemType.getWidth() === 8;
             }
 
-            private isAnyErrorType(type: AST.TypeNode): boolean {
-                if (!type.isPrimitive()) return false;
-                const prim = type.getPrimitive();
-                return prim?.kind === 'err';
-            }
-
             private isErrorType(type: AST.TypeNode): boolean {
                 // Direct error set: error{A, B, C}
                 if (type.isErrset()) {
                     return true;
                 }
 
+                // Error type: check if it resolves to an error type
+                if (type.isErr()) { return true; }
+
                 // Error identifier: check if it resolves to an error type
                 if (type.isIdent()) {
                     const ident = type.getIdent()!;
-
-                    // Check if it's anyerror
-                    if (ident.name === 'anyerror') {
-                        return true;
-                    }
 
                     // Try to lookup symbol in current scope chain
                     const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -3894,20 +4409,41 @@
         // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             private arePointerTypesCompatible(target: AST.TypeNode, source: AST.TypeNode): boolean {
-                const targetPtr = target.getPointer()!;
-                const sourcePtr = source.getPointer()!;
+                // Use normalizeType instead of unwrapParenType
+                const normalizedTarget = this.normalizeType(target);
+                const normalizedSource = this.normalizeType(source);
 
-                const baseCompatible = targetPtr.target.isOptional() ?
-                    this.isSameType(targetPtr.target.getOptional()!.target, sourcePtr.target) :
-                    this.isSameType(targetPtr.target, sourcePtr.target);
+                const targetPtr = normalizedTarget.getPointer()!;
+                const sourcePtr = normalizedSource.getPointer()!;
 
-                if (!baseCompatible) {
-                    this.reportError(
-                        DiagCode.TYPE_MISMATCH,
-                        `Cannot assign '${source.toString()}' to variable of type '${target.toString()}'`,
-                        source.span
-                    );
-                    return false;
+                // Normalize the pointer targets as well
+                const resolvedTargetBase = this.normalizeType(this.resolveIdentifierType(targetPtr.target));
+                const resolvedSourceBase = this.normalizeType(this.resolveIdentifierType(sourcePtr.target));
+
+                // Special handling for optional: *T -> *?T is allowed
+                if (resolvedTargetBase.isOptional()) {
+                    const targetInner = resolvedTargetBase.getOptional()!.target;
+                    const innerCompatible = this.isSameType(targetInner, resolvedSourceBase);
+
+                    if (!innerCompatible) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Cannot assign '${this.getTypeDisplayName(source)}' to variable of type '${this.getTypeDisplayName(target)}'`,
+                            source.span
+                        );
+                        return false;
+                    }
+                } else {
+                    const baseCompatible = this.isSameType(resolvedTargetBase, resolvedSourceBase);
+
+                    if (!baseCompatible) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Cannot assign '${this.getTypeDisplayName(source)}' to variable of type '${this.getTypeDisplayName(target)}'`,
+                            source.span
+                        );
+                        return false;
+                    }
                 }
 
                 if (targetPtr.mutable && !sourcePtr.mutable) {
@@ -3916,17 +4452,6 @@
                         `Cannot assign immutable pointer to mutable pointer variable`,
                         source.span
                     );
-                    return false;
-                }
-
-                // Check base type compatibility first
-                if (!this.isTypeCompatible(targetPtr.target, sourcePtr.target)) {
-                    return false;
-                }
-
-                // Cannot assign immutable pointer to mutable pointer variable
-                if (targetPtr.mutable && !sourcePtr.mutable) {
-                    // Don't report here - let caller handle error
                     return false;
                 }
 
@@ -4026,7 +4551,7 @@
                             return false;
                         }
                     }
-                    
+
                     // All other comptime conversions are allowed
                     return true;
                 }
@@ -4034,7 +4559,7 @@
                 // **NOW CHECK NARROWING - ONLY FOR RUNTIME TYPES**
                 const targetWidth = target.getWidth() ?? 64;
                 const sourceWidth = source.getWidth() ?? 64;
-                
+
                 if (sourceWidth > targetWidth) {
                     return false; // Narrowing not allowed
                 }
@@ -4104,125 +4629,57 @@
             }
 
             private validateValueFitsInType(expr: AST.ExprNode, targetType: AST.TypeNode): void {
-                // Only check for integer/float literals and compile-time constants
-                const value = this.ExpressionEvaluator.evaluateComptimeExpression(expr, targetType);
+                // Handle both integers and floats
+                const unwrapped = this.resolveIdentifierType(targetType);
 
-                if (value === null) {
-                    // Not a compile-time constant, can't check overflow statically
+                // Check if it's an integer type
+                if (unwrapped.isSigned() || unwrapped.isUnsigned() || unwrapped.isComptimeInt()) {
+                    const value = this.ExpressionEvaluator.evaluateComptimeExpression(expr, targetType);
+                    // Value check already done in evaluateComptimeExpression
                     return;
                 }
 
-                // Get the bounds for the target type
-                const bounds = this.getTypeBounds(targetType);
-
-                // Check if value fits in range
-                if (value < bounds.min || value > bounds.max) {
-                    this.reportError(
-                        DiagCode.ARITHMETIC_OVERFLOW,
-                        `Value ${value} does not fit in type '${targetType.toString()}' (valid range: ${bounds.min} to ${bounds.max})`,
-                        expr.span
-                    );
-                }
-            }
-
-            private getTypeBounds(type: AST.TypeNode): { min: bigint; max: bigint } {
-                if (type.isSigned()) {
-                    const width = type.getWidth() || 64;
-                    if (width === 64) {
-                        return {
-                            min: BigInt('-9223372036854775808'),
-                            max: BigInt('9223372036854775807')
-                        };
-                    }
-                    const max = BigInt(2) ** BigInt(width - 1) - BigInt(1);
-                    const min = -(BigInt(2) ** BigInt(width - 1));
-                    return { min, max };
+                // Check if it's a float type
+                if (unwrapped.isFloat() || unwrapped.isComptimeFloat()) {
+                    const value = this.ExpressionEvaluator.evaluateComptimeFloat(expr, targetType);
+                    // Value check already done in evaluateComptimeFloat
+                    return;
                 }
 
-                if (type.isUnsigned()) {
-                    const width = type.getWidth() || 64;
-                    const max = BigInt(2) ** BigInt(width) - BigInt(1);
-                    return { min: BigInt(0), max };
-                }
-
-                // For other types, use full range
-                return {
-                    min: BigInt('-9223372036854775808'),
-                    max: BigInt('9223372036854775807')
-                };
+                // Not a numeric type - no validation needed
             }
 
             private isValidThrowType(thrownType: AST.TypeNode, functionErrorType: AST.TypeNode, span: AST.Span): boolean {
-                // Direct type match
-                if (this.isSameType(thrownType, functionErrorType)) {
-                    return true;
-                }
+                // Resolve the error type if it's an identifier
+                const resolvedErrorType = this.resolveIdentifierType(functionErrorType);
 
-                // **CASE 1**: Function error type is an error set
-                if (functionErrorType.isErrset()) {
-                    const errorSet = functionErrorType.getError()!;
+                // CASE 1: Function expects errset
+                if (resolvedErrorType.isErrset()) {
+                    const errorSet = resolvedErrorType.getErrset()!;
 
-                    // Check if thrown type is a member of the error set
+                    // If throwing an identifier, check if it's a member of the error set
                     if (thrownType.isIdent()) {
                         const thrownIdent = thrownType.getIdent()!;
                         const isMember = errorSet.members.some(member => member.name === thrownIdent.name);
-
-                        if (isMember) {
-                            return true;
-                        }
+                        return isMember;
                     }
 
                     return false;
                 }
 
-                // **CASE 2**: Function error type is an identifier (e.g., MyError)
-                if (functionErrorType.isIdent()) {
-                    const funcErrorIdent = functionErrorType.getIdent()!;
-
-                    // Look up the actual error type definition
-                    const errorSymbol = this.config.services.scopeManager.lookupSymbol(funcErrorIdent.name);
-                    if (errorSymbol && errorSymbol.type && errorSymbol.type.isErrset()) {
-                        const errorSet = errorSymbol.type.getError()!;
-
-                        // Check if thrown type is a member
+                // CASE 2: Function expects err primitive type
+                if (resolvedErrorType.isPrimitive()) {
+                    const prim = resolvedErrorType.getPrimitive();
+                    if (prim?.kind === 'err') {
+                        // The error name is stored in text field
+                        // Compare with thrown type's name
                         if (thrownType.isIdent()) {
-                            const thrownIdent = thrownType.getIdent()!;
-                            return errorSet.members.some(member => member.name === thrownIdent.name);
+                            return thrownType.getIdent()!.name === prim.text;
                         }
                     }
                 }
 
-                // Handle when thrown type is an error member identifier
-                // and function expects anyerror or a broader error type
-                if (thrownType.isIdent()) {
-                    const thrownIdent = thrownType.getIdent()!;
-                    const thrownSymbol = this.config.services.scopeManager.lookupSymbol(thrownIdent.name);
-
-                    // If it's an error member, check if function accepts it
-                    if (thrownSymbol && thrownSymbol.kind === SymbolKind.Error) {
-                        // If function error type is anyerror, accept it
-                        if (this.isAnyErrorType(functionErrorType)) {
-                            return true;
-                        }
-
-                        // Otherwise, need to verify it's part of the allowed error set
-                        return this.isErrorMemberOfType(thrownIdent.name, functionErrorType);
-                    }
-                }
-
-                return false;
-            }
-
-            private isErrorMemberOfType(memberName: string, errorType: AST.TypeNode): boolean {
-                // Resolve the error type if it's an identifier
-                const resolvedType = this.resolveIdentifierType(errorType);
-
-                if (resolvedType.isErrset()) {
-                    const errorSet = resolvedType.getError()!;
-                    return errorSet.members.some(member => member.name === memberName);
-                }
-
-                return false;
+                return true;
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -4344,6 +4801,97 @@
                 return null;
             }
 
+            /**
+             * Normalizes a type by unwrapping all parentheses while preserving
+             * the original type for span-based error reporting.
+             *
+             * This ensures type comparisons work correctly regardless of parenthesization.
+             */
+            private normalizeType(type: AST.TypeNode): AST.TypeNode {
+                // Unwrap all paren layers
+                while (type.isParen()) {
+                    type = type.getParen()!.type;
+                }
+
+                // Recursively normalize nested types
+                switch (type.kind) {
+                    case 'pointer': {
+                        const ptr = type.getPointer()!;
+                        const normalizedTarget = this.normalizeType(ptr.target);
+
+                        // Only create new node if target changed
+                        if (normalizedTarget !== ptr.target) {
+                            return AST.TypeNode.asPointer(type.span, normalizedTarget, ptr.mutable);
+                        }
+                        return type;
+                    }
+
+                    case 'optional': {
+                        const opt = type.getOptional()!;
+                        const normalizedTarget = this.normalizeType(opt.target);
+
+                        if (normalizedTarget !== opt.target) {
+                            return AST.TypeNode.asOptional(type.span, normalizedTarget);
+                        }
+                        return type;
+                    }
+
+                    case 'array': {
+                        const arr = type.getArray()!;
+                        const normalizedTarget = this.normalizeType(arr.target);
+
+                        if (normalizedTarget !== arr.target) {
+                            return AST.TypeNode.asArray(type.span, normalizedTarget, arr.size);
+                        }
+                        return type;
+                    }
+
+                    case 'tuple': {
+                        const tuple = type.getTuple()!;
+                        const normalizedFields = tuple.fields.map(f => this.normalizeType(f));
+
+                        // Check if any field changed
+                        const hasChanges = normalizedFields.some((nf, i) => nf !== tuple.fields[i]);
+                        if (hasChanges) {
+                            return AST.TypeNode.asTuple(type.span, normalizedFields);
+                        }
+                        return type;
+                    }
+
+                    case 'function': {
+                        const func = type.getFunction()!;
+                        const normalizedParams = func.params.map(p => this.normalizeType(p));
+                        const normalizedReturn = func.returnType ? this.normalizeType(func.returnType) : null;
+
+                        const hasChanges = normalizedParams.some((np, i) => np !== func.params[i]) ||
+                                        (normalizedReturn && normalizedReturn !== func.returnType);
+
+                        if (hasChanges) {
+                            return AST.TypeNode.asFunction(
+                                type.span,
+                                normalizedParams,
+                                normalizedReturn || undefined
+                            );
+                        }
+                        return type;
+                    }
+
+                    case 'union': {
+                        const union = type.getUnion()!;
+                        const normalizedTypes = union.types.map(t => this.normalizeType(t));
+
+                        const hasChanges = normalizedTypes.some((nt, i) => nt !== union.types[i]);
+                        if (hasChanges) {
+                            return AST.TypeNode.asUnion(type.span, normalizedTypes);
+                        }
+                        return type;
+                    }
+
+                    default:
+                        return type;
+                }
+            }
+
         // └──────────────────────────────────────────────────────────────────────┘
 
 
@@ -4357,22 +4905,19 @@
                 return moduleScope;
             }
 
-            private findCallTargetSymbol(baseExpr: AST.ExprNode, objectScope?: Scope): Symbol | undefined {
-                if (baseExpr.kind === 'Primary') {
-                    const primary = baseExpr.getPrimary()!;
+            private findCallTargetSymbol(baseExpr: AST.ExprNode): Symbol | null {
+                if (baseExpr.is('Primary')) {
+                    const primary = baseExpr.getPrimary();
 
-                    if (primary.kind === 'Ident') {
+                    if (primary?.is('Ident')) {
                         const ident = primary.getIdent();
-                        if (ident) {
-                            const s = objectScope
-                            ? this.config.services.scopeManager.lookupSymbolInScopeChain(ident.name, objectScope.id)
-                            : this.config.services.scopeManager.lookupSymbol(ident.name) ?? undefined;
-                            return s ?? undefined;
+                        if (ident && !ident.builtin) {
+                            return this.config.services.scopeManager.lookupSymbol(ident.name);
                         }
                     }
                 }
 
-                return undefined;
+                return null;
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -4416,23 +4961,6 @@
                 }
 
                 return false;
-            }
-
-            private isAccessibleFrom(targetScope: Scope): boolean {
-                const currentScope = this.config.services.scopeManager.getCurrentScope();
-
-                let current: Scope | null = currentScope;
-                let target: Scope | null = targetScope;
-
-                while (current && current.kind !== ScopeKind.Module) {
-                    current = current.parent !== null ? this.config.services.scopeManager.getScope(current.parent) : null;
-                }
-
-                while (target && target.kind !== ScopeKind.Module) {
-                    target = target.parent !== null ? this.config.services.scopeManager.getScope(target.parent) : null;
-                }
-
-                return current?.id === target?.id;
             }
 
             private isBoolLiteral(expr: AST.ExprNode | undefined, value: boolean): boolean {
@@ -4505,6 +5033,59 @@
                     moduleStack     : [],
                     typeCache       : new Map(),
                 };
+            }
+
+            private getTypeDisplayName(type: AST.TypeNode): string {
+                // Handle pointer types
+                if (type.isPointer()) {
+                    const ptr = type.getPointer()!;
+                    const targetName = this.getTypeDisplayName(ptr.target);
+                    return ptr.mutable ? `*mut ${targetName}` : `*${targetName}`;
+                }
+
+                // Handle optional types
+                if (type.isOptional()) {
+                    const opt = type.getOptional()!;
+                    const targetName = this.getTypeDisplayName(opt.target);
+                    return `?${targetName}`;
+                }
+
+                // Handle array types
+                if (type.isArray()) {
+                    const arr = type.getArray()!;
+                    const targetName = this.getTypeDisplayName(arr.target);
+                    // return `[${arr.size ? '...' : ''}]${targetName}`;
+                    return `[]${targetName}`;
+                }
+
+                // Resolve identifier types first
+                const resolved = this.resolveIdentifierType(type);
+
+                // Check for struct with a name
+                if (resolved.isStruct()) {
+                    const struct = resolved.getStruct()!;
+                    if (struct.name && struct.name !== 'Anonymous') {
+                        return struct.name;
+                    }
+                    return 'struct';
+                }
+
+                // Check for enum with a name
+                if (resolved.isEnum()) {
+                    const enumType = resolved.getEnum()!;
+                    if (enumType.name && enumType.name !== 'Anonymous') {
+                        return enumType.name;
+                    }
+                    return 'enum';
+                }
+
+                // Check for identifier (type alias)
+                if (type.isIdent()) {
+                    return type.getIdent()!.name;
+                }
+
+                // Fall back to toString()
+                return type.toString();
             }
 
         // └──────────────────────────────────────────────────────────────────────┘

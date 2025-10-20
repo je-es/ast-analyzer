@@ -2,16 +2,12 @@
 //
 // Developed with ❤️ by Maysara.
 
-
-
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
     import { Span }                 from '@je-es/ast';
     import { ContextTracker }       from './ContextTracker';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
-
-
 
 // ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
 
@@ -36,11 +32,14 @@
         SYMBOL_NOT_ACCESSIBLE       = 'SYMBOL_NOT_ACCESSIBLE',
         INVALID_SIZEOF_TARGET       = 'INVALID_SIZEOF_TARGET',
 
-        // Error handling codes
+        // Error handling codes - MORE SPECIFIC
         THROW_WITHOUT_ERROR_TYPE    = 'THROW_WITHOUT_ERROR_TYPE',
         THROW_TYPE_MISMATCH         = 'THROW_TYPE_MISMATCH',
         THROW_OUTSIDE_FUNCTION      = 'THROW_OUTSIDE_FUNCTION',
         INVALID_ERROR_TYPE          = 'INVALID_ERROR_TYPE',
+        ERROR_MEMBER_NOT_FOUND      = 'ERROR_MEMBER_NOT_FOUND',        // Error set member not found
+        SELFERR_INVALID_CONTEXT     = 'SELFERR_INVALID_CONTEXT',       // selferr used outside self-group
+        THROW_NON_ERROR_TYPE        = 'THROW_NON_ERROR_TYPE',          // Throwing non-error value
 
         TYPE_VALIDATION_FAILED      = 'TYPE_VALIDATION_FAILED',
         INVALID_TYPE_OPERATION      = 'INVALID_TYPE_OPERATION',
@@ -58,8 +57,13 @@
         ENTRY_MODULE_NO_MAIN        = 'ENTRY_MODULE_NO_MAIN',
         ENTRY_MODULE_PRIVATE_MAIN   = 'ENTRY_MODULE_PRIVATE_MAIN',
 
-        // Type System
+        // Type System - MORE SPECIFIC
         TYPE_MISMATCH               = 'TYPE_MISMATCH',
+        TYPE_MISMATCH_CALL          = 'TYPE_MISMATCH_CALL',            // Calling non-function
+        TYPE_MISMATCH_ASSIGNMENT    = 'TYPE_MISMATCH_ASSIGNMENT',      // Assignment type mismatch
+        TYPE_MISMATCH_RETURN        = 'TYPE_MISMATCH_RETURN',          // Return type mismatch
+        TYPE_MISMATCH_PARAMETER     = 'TYPE_MISMATCH_PARAMETER',       // Parameter type mismatch
+        TYPE_MISMATCH_FIELD         = 'TYPE_MISMATCH_FIELD',           // Struct field type mismatch
         ARRAY_TO_NON_ARRAY          = 'ARRAY_TO_NON_ARRAY',
         NON_ARRAY_TO_ARRAY          = 'NON_ARRAY_TO_ARRAY',
         BOOL_TO_NON_BOOL            = 'BOOL_TO_NON_BOOL',
@@ -68,8 +72,10 @@
         LITERAL_OVERFLOW            = 'LITERAL_OVERFLOW',
         CANNOT_INFER_TYPE           = 'CANNOT_INFER_TYPE',
 
-        // Symbol Resolution
+        // Symbol Resolution - MORE SPECIFIC
         UNDEFINED_IDENTIFIER        = 'UNDEFINED_IDENTIFIER',
+        UNDEFINED_IDENTIFIER_MEMBER = 'UNDEFINED_IDENTIFIER_MEMBER',   // Member access on undefined
+        UNDEFINED_IDENTIFIER_TYPEOF = 'UNDEFINED_IDENTIFIER_TYPEOF',   // typeof on undefined
         UNDEFINED_BUILTIN           = 'UNDEFINED_BUILTIN',
         UNDEFINED_FUNCTION          = 'UNDEFINED_FUNCTION',
         NOT_A_FUNCTION              = 'NOT_A_FUNCTION',
@@ -112,11 +118,12 @@
         IMPORT_CIRCULAR_DEPENDENCY  = 'IMPORT_CIRCULAR_DEPENDENCY',
         IMPORT_PRIVATE_SYMBOL       = 'IMPORT_PRIVATE_SYMBOL',
 
-        // OVERFLOW
+        // OVERFLOW - MORE SPECIFIC
         NEGATIVE_SHIFT              = 'NEGATIVE_SHIFT',
         SHIFT_OVERFLOW              = 'SHIFT_OVERFLOW',
         SHIFT_RESULT_OVERFLOW       = 'SHIFT_RESULT_OVERFLOW',
         ARITHMETIC_OVERFLOW         = 'ARITHMETIC_OVERFLOW',
+        ARITHMETIC_OVERFLOW_COMPTIME = 'ARITHMETIC_OVERFLOW_COMPTIME',  // Overflow in comptime
         POTENTIAL_OVERFLOW          = 'POTENTIAL_OVERFLOW',
 
         DIVISION_BY_ZERO            = 'DIVISION_BY_ZERO',
@@ -126,9 +133,13 @@
 
         ARRAY_SIZE_MISMATCH         = 'ARRAY_SIZE_MISMATCH',
         MUTABILITY_MISMATCH         = 'MUTABILITY_MISMATCH',
+        MUTABILITY_MISMATCH_POINTER = 'MUTABILITY_MISMATCH_POINTER',   // Pointer mutability mismatch
         POTENTIAL_PRECISION_LOSS    = 'POTENTIAL_PRECISION_LOSS',
         POTENTIAL_DATA_LOSS         = 'POTENTIAL_DATA_LOSS',
 
+        // Comptime - MORE SPECIFIC
+        COMPTIME_EVAL_FAILED        = 'COMPTIME_EVAL_FAILED',          // Comptime evaluation failed
+        COMPTIME_NON_CONST          = 'COMPTIME_NON_CONST',            // Non-const in comptime context
     }
 
     export enum DiagKind {
@@ -158,8 +169,6 @@
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
-
-
 // ╔════════════════════════════════════════ CORE ════════════════════════════════════════╗
 
     export class DiagnosticManager {
@@ -177,25 +186,17 @@
 
         // └────────────────────────────────────────────────────────────────────┘
 
-
         // ┌──────────────────────────────── MAIN ──────────────────────────────┐
 
             push(diagnostic: Diagnostic): void {
-
-                // Enrich diagnostic only if values are not already provided by the caller
                 if (!diagnostic.sourceModuleName) {
                     diagnostic.sourceModuleName = this.contextTracker.getModuleName();
                 }
                 if (!diagnostic.sourceModulePath) {
-                    // Prefer the explicit module path from the context tracker when available
                     const ctxPath = this.contextTracker.getModulePath();
                     if (ctxPath && ctxPath.length > 0) {
                         diagnostic.sourceModulePath = ctxPath;
                     } else {
-                        // Best-effort fallback: if we know the module name, synthesize a
-                        // reasonable relative path like './<moduleName>' so downstream
-                        // consumers get a non-empty path. This avoids clearing path in
-                        // earlier phases and provides a predictable default.
                         const moduleName = this.contextTracker.getModuleName();
                         if (moduleName && moduleName.length > 0) {
                             diagnostic.sourceModulePath = `./${moduleName}`;
@@ -207,7 +208,6 @@
                 }
 
                 if (this.strictMode && this.diagnostics.length > 0 && diagnostic.kind === DiagKind.ERROR) {
-                    // In strict mode, avoid pushing more errors after the first
                     return;
                 }
 
@@ -266,24 +266,42 @@
 
         // └────────────────────────────────────────────────────────────────────┘
 
-
         // ┌──────────────────────────────── HELP ──────────────────────────────┐
 
             private isMoreSpecific(d1: Diagnostic, d2: Diagnostic): boolean {
-                // Special case: For character literal errors, prefer TYPE_MISMATCH over ARITHMETIC_OVERFLOW
-                if (d1.code === DiagCode.TYPE_MISMATCH && d2.code === DiagCode.ARITHMETIC_OVERFLOW) {
-                    // Check if ARITHMETIC_OVERFLOW is about a character literal (mentions code point value)
-                    if (d2.msg.includes('Value') && d2.msg.includes('does not fit in type') && 
-                        (d2.msg.includes("'char'") || d2.msg.includes("'u8'"))) {
-                        return true; // Prefer TYPE_MISMATCH (d1)
-                    }
-                }
-                if (d1.code === DiagCode.ARITHMETIC_OVERFLOW && d2.code === DiagCode.TYPE_MISMATCH) {
-                    // Check if ARITHMETIC_OVERFLOW is about a character literal
-                    if (d1.msg.includes('Value') && d1.msg.includes('does not fit in type') && 
-                        (d1.msg.includes("'char'") || d1.msg.includes("'u8'"))) {
-                        return false; // Prefer TYPE_MISMATCH (d2)
-                    }
+                // Define priority hierarchy for related errors
+                const errorPriority = new Map<DiagCode, number>([
+                    // Most specific errors (highest priority)
+                    [DiagCode.MODULE_NOT_FOUND, 100],
+                    [DiagCode.ERROR_MEMBER_NOT_FOUND, 100],
+                    [DiagCode.USED_BEFORE_DECLARED, 100],
+                    [DiagCode.SELFERR_INVALID_CONTEXT, 100],
+                    [DiagCode.NOT_A_FUNCTION, 90],
+                    [DiagCode.ARITHMETIC_OVERFLOW_COMPTIME, 90],
+                    [DiagCode.UNDEFINED_IDENTIFIER_MEMBER, 90],
+                    [DiagCode.UNDEFINED_IDENTIFIER_TYPEOF, 90],
+
+                    // Specific errors (high priority)
+                    [DiagCode.UNDEFINED_IDENTIFIER, 80],
+                    [DiagCode.ARITHMETIC_OVERFLOW, 80],
+                    [DiagCode.THROW_WITHOUT_ERROR_TYPE, 80],
+                    [DiagCode.MISSING_RETURN_STATEMENT, 70],
+                    [DiagCode.SYMBOL_NOT_FOUND, 60],
+
+                    // Generic errors (low priority)
+                    [DiagCode.THROW_TYPE_MISMATCH, 40],
+                    [DiagCode.TYPE_MISMATCH_CALL, 30],
+                    [DiagCode.TYPE_MISMATCH, 20],
+                    [DiagCode.TYPE_INFERENCE_FAILED, 10],
+                    [DiagCode.COMPTIME_EVAL_FAILED, 10],
+                    // [DiagCode.ANALYSIS_ERROR, 5],
+                ]);
+
+                const priority1 = errorPriority.get(d1.code) ?? 50;
+                const priority2 = errorPriority.get(d2.code) ?? 50;
+
+                if (priority1 !== priority2) {
+                    return priority1 > priority2;
                 }
 
                 // Longer message usually means more context
@@ -303,7 +321,6 @@
                     return context1Size > context2Size;
                 }
 
-                // Check priority (error > warning)
                 return this.hasHigherPriority(d1, d2);
             }
 
@@ -319,7 +336,7 @@
                     let foundDuplicate = false;
                     let duplicateKey: string | null = null;
 
-                    // First, check if this is the same issue as any existing diagnostic
+                    // Check if this is the same issue as any existing diagnostic
                     for (const [key, existingDiagnostic] of seen.entries()) {
                         if (this.isSameIssue(diagnostic, existingDiagnostic)) {
                             foundDuplicate = true;
@@ -329,7 +346,6 @@
                     }
 
                     if (!foundDuplicate) {
-                        // No duplicate found, use the normal target key
                         const targetKey = this.getTargetKey(diagnostic);
                         seen.set(targetKey, diagnostic);
                     } else if (duplicateKey) {
@@ -348,27 +364,72 @@
                 const targetKey = diagnostic.targetSpan
                     ? `t:${diagnostic.targetSpan.start}-${diagnostic.targetSpan.end}`
                     : 'no-target';
-                // Remove diagnostic code from key to allow different codes for same location
                 return targetKey;
             }
 
             private isSameIssue(d1: Diagnostic, d2: Diagnostic): boolean {
-                // Same target span is the primary indicator
                 const target1 = d1.targetSpan ? `${d1.targetSpan.start}-${d1.targetSpan.end}` : 'no-target';
                 const target2 = d2.targetSpan ? `${d2.targetSpan.start}-${d2.targetSpan.end}` : 'no-target';
 
-                if(d1.code === 'TYPE_MISMATCH' && d2.code === 'TYPE_MISMATCH') {
+                // Multiple errors of these types are ALWAYS distinct, even at same location
+                const alwaysDistinctCodes = new Set([
+                    DiagCode.MODULE_NOT_FOUND,
+                    DiagCode.TYPE_MISMATCH,
+                    DiagCode.TYPE_MISMATCH_FIELD,
+                    DiagCode.SYMBOL_NOT_FOUND,
+                    DiagCode.USED_BEFORE_DECLARED,
+                    DiagCode.USED_BEFORE_INITIALIZED,
+                    DiagCode.MUTABILITY_MISMATCH,
+                ]);
+
+                // If both are "always distinct" codes, they're different issues
+                if (alwaysDistinctCodes.has(d1.code) && alwaysDistinctCodes.has(d2.code)) {
                     return false;
                 }
-                if (target1 === target2) {
-                    // Same target span - definitely the same issue
 
-                    // Extract identifier from message using more flexible patterns
+                // Check for overlapping target spans (not necessarily exact match)
+                const hasOverlappingTargets = target1 !== 'no-target' && target2 !== 'no-target' &&
+                    this.spansOverlap(d1.targetSpan!, d2.targetSpan!);
+
+                if (hasOverlappingTargets) {
+                    // Define known cascading patterns with related error codes
+                    const cascadingPatterns = [
+                        // [Root cause, Cascading error]
+                        [DiagCode.UNDEFINED_IDENTIFIER, DiagCode.TYPE_INFERENCE_FAILED],
+                        [DiagCode.UNDEFINED_IDENTIFIER_MEMBER, DiagCode.TYPE_INFERENCE_FAILED],
+                        [DiagCode.UNDEFINED_IDENTIFIER_TYPEOF, DiagCode.TYPE_INFERENCE_FAILED],
+                        [DiagCode.USED_BEFORE_DECLARED, DiagCode.TYPE_MISMATCH],
+                        [DiagCode.NOT_A_FUNCTION, DiagCode.TYPE_MISMATCH],
+                        [DiagCode.NOT_A_FUNCTION, DiagCode.TYPE_MISMATCH_CALL],
+                        [DiagCode.THROW_WITHOUT_ERROR_TYPE, DiagCode.MISSING_RETURN_STATEMENT],
+                        [DiagCode.ARITHMETIC_OVERFLOW, DiagCode.ANALYSIS_ERROR],
+                        [DiagCode.MODULE_NOT_FOUND, DiagCode.ANALYSIS_ERROR],
+                        [DiagCode.ARITHMETIC_OVERFLOW_COMPTIME, DiagCode.COMPTIME_EVAL_FAILED],
+                        [DiagCode.MISSING_RETURN_STATEMENT, DiagCode.ANALYSIS_ERROR],
+                        [DiagCode.MISSING_RETURN_STATEMENT, DiagCode.COMPTIME_EVAL_FAILED],
+
+                        // Duplicate detection from different validation layers
+                        [DiagCode.SYMBOL_NOT_FOUND, DiagCode.ERROR_MEMBER_NOT_FOUND],  // Error member - both report same issue
+                        [DiagCode.SYMBOL_NOT_FOUND, DiagCode.THROW_TYPE_MISMATCH],     // Symbol not found causes throw mismatch
+                        [DiagCode.ERROR_MEMBER_NOT_FOUND, DiagCode.THROW_TYPE_MISMATCH], // More specific error + generic
+                        [DiagCode.UNDEFINED_IDENTIFIER, DiagCode.SELFERR_INVALID_CONTEXT], // selferr detection in different phases
+                        [DiagCode.SELFERR_INVALID_CONTEXT, DiagCode.THROW_TYPE_MISMATCH], // selferr + throw mismatch
+                    ];
+
+                    // Check if this matches any known cascading pattern
+                    for (const [root, cascade] of cascadingPatterns) {
+                        if ((d1.code === root && d2.code === cascade) ||
+                            (d2.code === root && d1.code === cascade)) {
+                            return true;
+                        }
+                    }
+
+                    // Extract identifier from message
                     const identifierPatterns = [
                         /identifier '([^']+)'/i,
                         /Symbol '([^']+)'/i,
                         /'([^']+)' already imported/i,
-                        /'([^']+)' shadows use/i
+                        /'([^']+)' shadows/i
                     ];
 
                     let id1: string | null = null;
@@ -379,12 +440,12 @@
                         id2 = id2 || d2.msg.match(pattern)?.[1] || null;
                     }
 
-                    // If both mention the same identifier, it's the same issue
+                    // If both mention the same identifier, it's likely the same issue
                     if (id1 && id2 && id1 === id2) {
                         return true;
                     }
 
-                    // Check for duplicate/shadowing patterns with same target
+                    // Check for duplicate/shadowing patterns
                     const isDuplicateRelated = (code: DiagCode) =>
                         code === DiagCode.DUPLICATE_SYMBOL ||
                         code === DiagCode.USE_SHADOWING ||
@@ -400,12 +461,11 @@
                     return true; // Same target = same issue by default
                 }
 
-                // **NEW: Check if they share the same context and are related errors**
+                // Check if they share the same context and are related type errors
                 const context1 = d1.contextSpan ? `${d1.contextSpan.start}-${d1.contextSpan.end}` : 'no-context';
                 const context2 = d2.contextSpan ? `${d2.contextSpan.start}-${d2.contextSpan.end}` : 'no-context';
 
                 if (context1 === context2 && context1 !== 'no-context') {
-                    // Same context - check if errors are related
                     const isTypeError = (code: DiagCode) =>
                         code === DiagCode.TYPE_MISMATCH ||
                         code === DiagCode.ARITHMETIC_OVERFLOW ||
@@ -421,8 +481,12 @@
                 return false;
             }
 
-        // └────────────────────────────────────────────────────────────────────┘
+            private spansOverlap(s1: Span, s2: Span): boolean {
+                // Check if spans overlap at all
+                return s1.start <= s2.end && s2.start <= s1.end;
+            }
 
+        // └────────────────────────────────────────────────────────────────────┘
     }
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝

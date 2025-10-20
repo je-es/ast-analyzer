@@ -78,7 +78,6 @@
 
     export type SymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
 
-    // NEW: Saved state for scope operations
     export interface SavedContextState {
         scopeId                 : ScopeId;
         moduleName              : string;
@@ -149,10 +148,6 @@
 
         // ┌─────────────────────── STATE SAVE/RESTORE (NEW) ──────────────────┐
 
-            /**
-             * Save the current context state before entering a new scope/context.
-             * This captures all relevant state that needs to be restored later.
-             */
             saveState(): SavedContextState {
                 const state: SavedContextState = {
                     scopeId                 : this.context.currentScope,
@@ -171,15 +166,12 @@
                 return state;
             }
 
-            /**
-             * Restore with validation to catch state corruption
-             */
             restoreState(state: SavedContextState): void {
                 this.debugManager?.log('verbose',
                     `♻️  Restoring context state: scope=${state.scopeId}, module=${state.moduleName}`
                 );
 
-                // CRITICAL: Validate state before restoration
+                // Validate state before restoration
                 if (!this.validateSavedState(state)) {
                     this.debugManager?.log('errors', `⚠️  Invalid saved state detected, attempting recovery`);
                     // Don't throw - try to recover gracefully
@@ -205,6 +197,15 @@
                 }
             }
 
+            withSavedState<T>(fn: () => T): T {
+                const savedState = this.saveState();
+                try {
+                    return fn();
+                } finally {
+                    this.restoreState(savedState);
+                }
+            }
+
             private restoreStack<T>(stack: T[], targetDepth: number, name: string): void {
                 if (stack.length < targetDepth) {
                     this.debugManager?.log('errors',
@@ -224,29 +225,6 @@
                 if (state.declarationStackDepth < 0) return false;
                 if (state.expressionStackDepth < 0) return false;
                 return true;
-            }
-
-            /**
-             * Execute a function with saved/restored context.
-             * This is a convenience wrapper that automatically handles state management.
-             *
-             * Usage:
-             * ```typescript
-             * contextTracker.withSavedState(() => {
-             *     // Do work that changes context
-             *     contextTracker.setScope(newScope);
-             *     processNode(node);
-             * });
-             * // Context is automatically restored here
-             * ```
-             */
-            withSavedState<T>(fn: () => T): T {
-                const savedState = this.saveState();
-                try {
-                    return fn();
-                } finally {
-                    this.restoreState(savedState);
-                }
             }
 
         // └────────────────────────────────────────────────────────────────────┘

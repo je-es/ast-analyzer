@@ -36,7 +36,6 @@
         syntheticSymbolsInjected    : number;
     }
 
-    // Structured type collection context
     interface TypeCollectionContext {
         visitedTypes                : Set<string>;
         currentTypePath             : string[];
@@ -244,7 +243,25 @@
                     this.config.services.scopeManager.withScope(currentScope.id, () => {
                         this.config.services.contextTracker.withSavedState(() => {
                             this.config.services.contextTracker.setScope(currentScope.id);
-                            this.processStmt(stmt, currentScope, moduleName);
+
+                            this.processStmtByKind(stmt, {
+                                'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
+                                'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
+                                'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
+                                'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
+                                'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
+                                'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
+                                'Expression': (exprNode)  => this.collectExpr(exprNode, currentScope, moduleName),
+
+                                // special cases
+                                'While'     : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'Do'        : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'For'       : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+
+                                'Return'    : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Defer'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Throw'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                            });
                         });
                     });
                 } catch (error) {
@@ -258,76 +275,12 @@
                 }
             }
 
-            private processStmt(stmt: AST.StmtNode, currentScope: Scope, moduleName: string): void {
-                // Validate node before processing
-                const nodeGetter = this.getNodeGetter(stmt);
-                if (!nodeGetter) {
-                    this.reportError(DiagCode.INTERNAL_ERROR, `Invalid AST: ${stmt.kind} node is null`);
-                    return;
-                }
-
-                switch (stmt.kind) {
-                    case 'Block':
-                        this.handleBlockStatement(stmt.getBlock()!, currentScope, moduleName);
-                        break;
-                    case 'Test':
-                        this.handleTestStmt(stmt.getTest()!, currentScope, moduleName);
-                        break;
-                    case 'Use':
-                        this.handleUseStatement(stmt.getUse()!, currentScope, moduleName);
-                        break;
-                    case 'Def':
-                        this.handleDefStatement(stmt.getDef()!, currentScope, moduleName);
-                        break;
-                    case 'Let':
-                        this.handleLetStatement(stmt.getLet()!, currentScope, moduleName);
-                        break;
-                    case 'Func':
-                        this.handleFuncStatement(stmt.getFunc()!, currentScope, moduleName);
-                        break;
-                    case 'While':
-                    case 'Do':
-                    case 'For':
-                        this.handleLoopStmt(stmt, currentScope, moduleName);
-                        break;
-                    case 'Return':
-                    case 'Defer':
-                    case 'Throw':
-                        this.handleControlflowStmt(stmt, currentScope, moduleName);
-                        break;
-                    case 'Expression':
-                        this.collectExpr(stmt.getExpr()!, currentScope, moduleName);
-                        break;
-                }
-            }
-
-            private getNodeGetter(stmt: AST.StmtNode): (() => any) | null {
-                switch (stmt.kind) {
-                    case 'Def'          : return () => stmt.getDef();
-                    case 'Use'          : return () => stmt.getUse();
-                    case 'Let'          : return () => stmt.getLet();
-                    case 'Func'         : return () => stmt.getFunc();
-                    case 'Block'        : return () => stmt.getBlock();
-                    case 'Return'       : return () => stmt.getReturn();
-                    case 'Defer'        : return () => stmt.getDefer();
-                    case 'Throw'        : return () => stmt.getThrow();
-                    case 'Expression'   : return () => stmt.getExpr();
-                    case 'While'        :
-                    case 'Do'           :
-                    case 'For'          : return () => stmt.getLoop();
-                    case 'Break'        : return () => stmt.getBreak();
-                    case 'Continue'     : return () => stmt.getContinue();
-                    case 'Test'         : return () => stmt.getTest();
-                    default             : return null;
-                }
-            }
-
         // └──────────────────────────────────────────────────────────────────────┘
 
 
         // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
 
-            private handleBlockStatement(blockNode: AST.BlockStmtNode, scope: Scope, moduleName: string): void {
+            private handleBlockStmt(blockNode: AST.BlockStmtNode, scope: Scope, moduleName: string): void {
                 this.collectBlockStmt(blockNode, scope, moduleName);
             }
 
@@ -361,7 +314,7 @@
 
         // ┌───────────────────────────── [3.2] USE ──────────────────────────────┐
 
-            private handleUseStatement(useNode: AST.UseStmtNode, scope: Scope, moduleName: string): void {
+            private handleUseStmt(useNode: AST.UseStmtNode, scope: Scope, moduleName: string): void {
                 this.collectUseStmt(useNode, scope, moduleName);
             }
 
@@ -634,7 +587,7 @@
 
         // ┌───────────────────────────── [3.3] DEF ──────────────────────────────┐
 
-            private handleDefStatement(defNode: AST.DefStmtNode, scope: Scope, moduleName: string): void {
+            private handleDefStmt(defNode: AST.DefStmtNode, scope: Scope, moduleName: string): void {
                 this.collectDefStmt(defNode, scope, moduleName);
             }
 
@@ -685,7 +638,7 @@
 
         // ┌───────────────────────────── [3.4] LET ──────────────────────────────┐
 
-            private handleLetStatement(letNode: AST.LetStmtNode, scope: Scope, moduleName: string): void {
+            private handleLetStmt(letNode: AST.LetStmtNode, scope: Scope, moduleName: string): void {
                 this.collectLetStmt(letNode, scope, moduleName);
             }
 
@@ -724,11 +677,23 @@
 
                 this.checkForShadowing(letNode.field.ident.name, scope, SymbolKind.Variable, letNode.field.ident.span, true);
 
+                // Validate error type mutability BEFORE creating symbol
+                if (letNode.field.type) {
+                    if (letNode.field.type.isErr() && letNode.field.mutability.kind === 'Mutable') {
+                        this.reportError(
+                            DiagCode.MUTABILITY_MISMATCH,
+                            `Error values cannot be stored in mutable variables. Use 'let ${letNode.field.ident.name}: err = ...' instead of 'let mut'`,
+                            letNode.field.ident.span
+                        );
+                        return;
+                    }
+                }
+
                 const symbol: Symbol = this.createLetSymbol(letNode, scope, moduleName);
                 this.config.services.scopeManager.addSymbolToScope(symbol, scope.id);
                 this.incrementSymbolsCollected();
 
-                this.trackModuleExport(moduleName, letNode.field.ident.name, symbol.isExported);
+                this.trackModuleExport(moduleName, letNode.field.ident.name, symbol.isExported)
 
                 // Handle constructor expressions during collection
                 if (letNode.field.initializer) {
@@ -812,8 +777,58 @@
 
         // ┌───────────────────────────── [3.5] FUNC ─────────────────────────────┐
 
-            private handleFuncStatement(funcNode: AST.FuncStmtNode, scope: Scope, moduleName: string): void {
+            private handleFuncStmt(funcNode: AST.FuncStmtNode, scope: Scope, moduleName: string): void {
                 this.collectFuncStmt(funcNode, scope, moduleName);
+            }
+
+            private determineErrorMode(errorType: AST.TypeNode): 'err-ident' | 'err-group' | 'any-error' | 'self-group' {
+                // CASE 1: Direct 'err' type -> any error
+                if (errorType.isErr()) {
+                    return 'any-error';
+                }
+
+                // CASE 2: Inline error set -> self-group
+                if (errorType.isErrset()) {
+                    return 'self-group';
+                }
+
+                // CASE 3: Identifier -> need to check what it refers to
+                if (errorType.isIdent()) {
+                    const ident = errorType.getIdent()!;
+
+                    // Skip builtin check
+                    if (ident.builtin) {
+                        return 'any-error';
+                    }
+
+                    // Try to find the symbol
+                    const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+
+                    if (!symbol) {
+                        return 'any-error'; // Safe fallback - will be validated in resolver
+                    }
+
+                    // Check symbol kind and type
+                    if (symbol.kind === SymbolKind.Variable && symbol.type?.isErr()) {
+                        return 'err-ident'; // let MyErr: err = ...
+                    }
+
+                    if (symbol.kind === SymbolKind.Definition && symbol.type?.isErrset()) {
+                        return 'err-group'; // def ErrGroup = errset{...}
+                    }
+                }
+
+                return 'any-error'; // Safe default
+            }
+
+            private extractSelfGroupErrors(errorType: AST.TypeNode | undefined): string[] | undefined {
+                if (!errorType || !errorType.isErrset()) {
+                    return undefined;
+                }
+
+                const errset = errorType.getErrset()!;
+                // errset.members are IdentNode[], extract their names
+                return errset.members.map(m => m.name);
             }
 
             private createFuncSymbol(funcNode: AST.FuncStmtNode, scope: Scope, moduleName: string): Symbol {
@@ -827,18 +842,29 @@
                 );
 
                 const isModuleScope = scope.kind === ScopeKind.Module;
-                const isPublic = funcNode.visibility.kind === 'Public'
+                const isPublic = funcNode.visibility.kind === 'Public';
+
+                // DETECT ERROR MODE
+                const errorMode = funcNode.errorType
+                    ? this.determineErrorMode(funcNode.errorType)
+                    : undefined;
+
+                const selfGroupErrors = errorMode === 'self-group'
+                    ? this.extractSelfGroupErrors(funcNode.errorType)
+                    : undefined;
 
                 return {
                     ...symbol,
-                    initialized     : true,
-                    visibility      : funcNode.visibility,
-                    isExported      : isModuleScope && isPublic,
-                    metadata        : {
-                        callable    : true,
-                        params      : [] as Symbol[],
-                        returnType  : funcNode.returnType || undefined,
-                        errorType   : funcNode.errorType  || undefined
+                    initialized: true,
+                    visibility: funcNode.visibility,
+                    isExported: isModuleScope && isPublic,
+                    metadata: {
+                        callable: true,
+                        params: [] as Symbol[],
+                        returnType: funcNode.returnType || undefined,
+                        errorType: funcNode.errorType || undefined,
+                        errorMode,           // NEW
+                        selfGroupErrors      // NEW
                     }
                 };
             }
@@ -860,10 +886,27 @@
 
                 const funcScope = this.createFuncScope(funcNode.ident.name, scope);
                 const funcSymbol = this.createFuncSymbol(funcNode, scope, moduleName);
+
+                // COLLECTION PHASE: Mark function as comptime (metadata only)
+                const isComptimeFunc = funcNode.comptime.kind === 'Comptime';
+                if (!funcSymbol.metadata) {
+                    funcSymbol.metadata = {};
+                }
+                funcSymbol.metadata.isComptimeFunction = isComptimeFunc;
+
+                // Store the function BODY for later evaluation in type validation phase
+                if (isComptimeFunc) {
+                    funcSymbol.metadata.comptimeFunctionBody = funcNode.body;
+                    funcSymbol.metadata.comptimeParameters = funcNode.parameters;
+                }
+
                 this.config.services.scopeManager.addSymbolToScope(funcSymbol, scope.id);
                 this.incrementSymbolsCollected();
-
                 this.trackModuleExport(moduleName, funcNode.ident.name, funcSymbol.isExported);
+
+                const errorMode = funcNode.errorType
+                ? this.determineErrorMode(funcNode.errorType)
+                : undefined;
 
                 // MOVED: Check if struct method BEFORE processing
                 const parentScope = this.config.services.scopeManager.getScope(scope.id);
@@ -876,6 +919,11 @@
                         // INJECT SELF FIRST (if struct method)
                         if (isStructMethod) {
                             this.injectSelfParameter(funcScope, parentScope, moduleName);
+                        }
+
+                        // INJECT selferr for self-group error mode
+                        if (errorMode === 'self-group' && funcNode.errorType) {
+                            this.injectSelfErrReference(funcScope, funcNode.errorType, moduleName);
                         }
 
                         this.collectType(funcNode.returnType, scope, moduleName, funcNode.ident.name);
@@ -1005,6 +1053,39 @@
                 this.incrementSymbolsCollected();
 
                 this.log('symbols', `Injected implicit 'self' parameter in struct method '${funcScope.name}'`);
+            }
+
+            private injectSelfErrReference(
+                funcScope: Scope,
+                errorType: AST.TypeNode,
+                moduleName: string
+            ): void {
+                const selfErrSymbol: Symbol = {
+                    id: this.config.services.scopeManager.symbolIdGenerator.next(),
+                    name: 'selferr',
+                    kind: SymbolKind.Definition,  // It's a type namespace
+                    type: errorType,  // Points to the error set
+                    scope: funcScope.id,
+                    contextSpan: { start: 0, end: 0 },  // Synthetic
+                    targetSpan: { start: 0, end: 0 },
+                    declared: true,
+                    initialized: true,
+                    used: false,  // Will be marked used when referenced
+                    visibility: { kind: 'Private' },
+                    mutability: { kind: 'Immutable' },
+                    isTypeChecked: false,
+                    isExported: false,
+                    module: moduleName,
+                    metadata: {
+                        isSynthetic: true,
+                        isSelfErr: true  // NEW FLAG to identify selferr
+                    }
+                };
+
+                this.config.services.scopeManager.addSymbolToScope(selfErrSymbol, funcScope.id);
+                this.stats.syntheticSymbolsInjected++;
+
+                this.log('symbols', `Injected 'selferr' reference in function with self-group errors`);
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -1341,7 +1422,6 @@
             }
 
             private validateSelfUsage(currentScope: Scope, span: AST.Span): void {
-                // Check if we're in a static method of a struct
                 let checkScope: Scope | null = currentScope;
                 let isInStaticMethod = false;
                 let structScope: Scope | null = null;
@@ -1355,7 +1435,7 @@
                         if (parentScope?.kind === ScopeKind.Type &&
                             parentScope.metadata?.typeKind === 'Struct') {
                             structScope = parentScope;
-                            // Check if this function is marked as static
+                            
                             const funcSymbol = parentScope.symbols.get(checkScope.name);
                             if (funcSymbol && funcSymbol.visibility.kind === 'Static') {
                                 isInStaticMethod = true;
@@ -1369,9 +1449,9 @@
                         : null;
                 }
 
-                // ALLOW 'self' in static methods - validation happens later in TypeValidator
+                // ALLOW 'self' in static methods (validation happens in member access)
                 if (isInStaticMethod && structScope) {
-                    // Don't block - let it pass through for member access validation
+                    // Don't block here - let member access validation handle it
                     return;
                 }
 
@@ -1381,7 +1461,7 @@
                 if (!selfSymbol || !selfSymbol.metadata?.isSelf) {
                     this.reportError(
                         DiagCode.UNDEFINED_IDENTIFIER,
-                        "self can only be used in struct methods",
+                        "self can only be used in instance methods",
                         span
                     );
                     return;
@@ -1488,7 +1568,7 @@
                             this.handleEnumType(type.getEnum()!, typeScope, moduleName);
                             break;
                         case 'errset':
-                            this.collectErrorType(type.getError()!, typeScope, moduleName);
+                            this.collectErrorType(type.getErrset()!, typeScope, moduleName);
                             break;
                         case 'tuple':
                             this.handleTupleType(type.getTuple()!, parentScope, moduleName);
@@ -1522,7 +1602,7 @@
             private handleStructType(structType: AST.StructTypeNode, typeScope: Scope, moduleName: string): void {
                 structType.metadata = { ...structType.metadata, scopeId: typeScope.id };
 
-                // CRITICAL: Mark scope so we know this is a struct type scope
+                // Mark scope so we know this is a struct type scope
                 typeScope.metadata = {
                     ...typeScope.metadata,
                     typeKind: 'Struct'  // This line exists but might not be executing
@@ -1621,6 +1701,19 @@
             private collectStructField(fieldNode: AST.FieldNode, scope: Scope, moduleName: string): void {
                 this.log('symbols', `Collecting structure field '${fieldNode.ident.name}'`);
 
+                // Validate static fields must be immutable
+                if (fieldNode.visibility.kind === 'Static') {
+                    if (fieldNode.mutability.kind === 'Mutable') {
+                        this.reportError(
+                            DiagCode.INVALID_VISIBILITY,
+                            `Static field '${fieldNode.ident.name}' cannot be mutable. Static fields must be immutable.`,
+                            fieldNode.span
+                        );
+                        // Force it to be immutable to prevent further errors
+                        fieldNode.mutability = { kind: 'Immutable' };
+                    }
+                }
+
                 // Only check for shadowing WITHIN the struct scope
                 if(this.checkForShadowing(fieldNode.ident.name, scope, SymbolKind.StructField, fieldNode.ident.span, false)) {
                     return;
@@ -1680,8 +1773,8 @@
 
                 const seenErrors = new Set<string>();
 
+                // errorType.members are IdentNode[]
                 for (const error of errorType.members) {
-                    // Check for duplicate error names
                     if (seenErrors.has(error.name)) {
                         this.reportError(
                             DiagCode.ERROR_SHADOWING,
@@ -1699,14 +1792,14 @@
                 }
             }
 
-            private createErrorSymbol(error: AST.IdentNode, scope: Scope, moduleName: string): Symbol {
+            private createErrorSymbol(identNode: AST.IdentNode, scope: Scope, moduleName: string): Symbol {
                 return this.createBaseSymbol(
-                    error.name,
+                    identNode.name,
                     SymbolKind.Error,
                     scope,
                     moduleName,
-                    error.span,
-                    error.span
+                    identNode.span,
+                    identNode.span
                 );
             }
 
@@ -1874,7 +1967,7 @@
                 try {
                     operation();
                 } finally {
-                    // CRITICAL: Always cleanup, even on error
+                    // Always cleanup, even on error
                     this.typeContext.visitedTypes.delete(typeKey);
                     this.typeContext.currentTypePath.pop();
                     this.typeContext.nestingDepth--;

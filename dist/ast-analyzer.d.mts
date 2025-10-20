@@ -83,6 +83,8 @@ interface Symbol {
         isStatic?: boolean;
         isAbstract?: boolean;
         isBuiltin?: boolean;
+        errorMode?: 'err-ident' | 'err-group' | 'any-error' | 'self-group';
+        selfGroupErrors?: string[];
         [key: string]: unknown;
     };
     importSource?: string;
@@ -95,6 +97,7 @@ interface Symbol {
 declare class ScopeManager {
     private readonly diagnosticManager;
     private readonly debugManager?;
+    private static readonly SYMBOL_PROXIMITY_THRESHOLD;
     private scopes;
     private currentScope;
     private globalScope;
@@ -107,8 +110,20 @@ declare class ScopeManager {
     reset(): void;
     createScope(kind: ScopeKind, name: string, parentId: ScopeId | null): Scope;
     withScope<T>(scopeId: ScopeId, fn: () => T): T;
-    findScopeByName(name: string, kind?: ScopeKind): Scope | null;
+    /**
+     * Find a scope by name, optionally filtered by kind.
+     * @param name - The scope name to search for
+     * @param kind - Optional: Filter by scope kind
+     * @param parentScopeId - Optional: Search only within this parent scope's children
+     */
+    findScopeByName(name: string, kind?: ScopeKind, parentScopeId?: ScopeId): Scope | null;
+    /**
+     * Find a child scope of the current scope by name.
+     */
     findChildScopeByName(name: string, kind?: ScopeKind): Scope | null;
+    /**
+     * Find a child scope by name from a specific parent scope.
+     */
     findChildScopeByNameFromId(name: string, scopeId: ScopeId, kind?: ScopeKind): Scope | null;
     getSymbolInCurrentScope(name: string): Symbol | null;
     getScopeParent(scopeId: ScopeId): Scope | null;
@@ -118,13 +133,10 @@ declare class ScopeManager {
     getCurrentScope(): Scope;
     getGlobalScope(): Scope;
     getAllScopes(): Scope[];
-    enterScopeById(scopeId: ScopeId): void;
-    getCurrentScopeId(): ScopeId;
     setCurrentScope(scopeId: ScopeId): void;
     addSymbolToScope(symbol: Symbol, scopeId: ScopeId): void;
     enterScope(kind: ScopeKind, name: string): ScopeId;
     exitScope(): ScopeId | null;
-    removeScope(scopeId: ScopeId): void;
     defineSymbol(name: string, kind: SymbolKind$1, opts: {
         type?: AST.TypeNode;
         visibility?: AST.VisibilityInfo;
@@ -145,9 +157,7 @@ declare class ScopeManager {
     markSymbolInitialized(symbolId: SymbolId): void;
     markSymbolTypeChecked(symbolId: SymbolId): void;
     setSymbolType(symbolId: SymbolId, type: AST.TypeNode): void;
-    getNamespaceSymbols(namespace: string): Symbol[];
     getAllSymbolsInScope(scopeId: ScopeId): Symbol[];
-    getAllNamespaces(): string[];
     /**
      * Look up a symbol in the current scope chain.
      * Prioritizes symbols from the current module before checking imported symbols.
@@ -169,6 +179,11 @@ declare class ScopeManager {
      * @returns The symbol if found, null otherwise
      */
     lookupSymbolFromLSP(word: string, position_span: AST.Span, moduleName?: string): Symbol | null;
+    /**
+    * Public method to get symbol at a specific position (used by LSP).
+    * This checks if the position directly points to a symbol definition.
+    */
+    getSymbolAtPosition(position: AST.Span): Symbol | null;
     /**
      * Find if the position is within an import statement.
      * Returns the Use symbol if position is within any import's contextSpan.
@@ -200,11 +215,6 @@ declare class ScopeManager {
      * @param rootScopeId - Optional: Restrict search to this scope and its children
      */
     private findScopeBySymbolProximity;
-    /**
-    * Public method to get symbol at a specific position (used by LSP).
-    * This checks if the position directly points to a symbol definition.
-    */
-    getSymbolAtPosition(position: AST.Span): Symbol | null;
 }
 
 declare enum DeclarationPhase {
@@ -280,32 +290,11 @@ declare class ContextTracker {
     init(): void;
     reset(): void;
     genAnalysisContext(): AnalysisContext;
-    /**
-     * Save the current context state before entering a new scope/context.
-     * This captures all relevant state that needs to be restored later.
-     */
     saveState(): SavedContextState;
-    /**
-     * Restore with validation to catch state corruption
-     */
     restoreState(state: SavedContextState): void;
+    withSavedState<T>(fn: () => T): T;
     private restoreStack;
     private validateSavedState;
-    /**
-     * Execute a function with saved/restored context.
-     * This is a convenience wrapper that automatically handles state management.
-     *
-     * Usage:
-     * ```typescript
-     * contextTracker.withSavedState(() => {
-     *     // Do work that changes context
-     *     contextTracker.setScope(newScope);
-     *     processNode(node);
-     * });
-     * // Context is automatically restored here
-     * ```
-     */
-    withSavedState<T>(fn: () => T): T;
     setModuleName(moduleName: string): void;
     setModulePath(modulePath: string): void;
     pushPhase(phase: AnalysisPhase): void;
@@ -391,6 +380,9 @@ declare enum DiagCode {
     THROW_TYPE_MISMATCH = "THROW_TYPE_MISMATCH",
     THROW_OUTSIDE_FUNCTION = "THROW_OUTSIDE_FUNCTION",
     INVALID_ERROR_TYPE = "INVALID_ERROR_TYPE",
+    ERROR_MEMBER_NOT_FOUND = "ERROR_MEMBER_NOT_FOUND",// Error set member not found
+    SELFERR_INVALID_CONTEXT = "SELFERR_INVALID_CONTEXT",// selferr used outside self-group
+    THROW_NON_ERROR_TYPE = "THROW_NON_ERROR_TYPE",// Throwing non-error value
     TYPE_VALIDATION_FAILED = "TYPE_VALIDATION_FAILED",
     INVALID_TYPE_OPERATION = "INVALID_TYPE_OPERATION",
     TYPE_INCOMPATIBLE = "TYPE_INCOMPATIBLE",
@@ -403,6 +395,11 @@ declare enum DiagCode {
     ENTRY_MODULE_NO_MAIN = "ENTRY_MODULE_NO_MAIN",
     ENTRY_MODULE_PRIVATE_MAIN = "ENTRY_MODULE_PRIVATE_MAIN",
     TYPE_MISMATCH = "TYPE_MISMATCH",
+    TYPE_MISMATCH_CALL = "TYPE_MISMATCH_CALL",// Calling non-function
+    TYPE_MISMATCH_ASSIGNMENT = "TYPE_MISMATCH_ASSIGNMENT",// Assignment type mismatch
+    TYPE_MISMATCH_RETURN = "TYPE_MISMATCH_RETURN",// Return type mismatch
+    TYPE_MISMATCH_PARAMETER = "TYPE_MISMATCH_PARAMETER",// Parameter type mismatch
+    TYPE_MISMATCH_FIELD = "TYPE_MISMATCH_FIELD",// Struct field type mismatch
     ARRAY_TO_NON_ARRAY = "ARRAY_TO_NON_ARRAY",
     NON_ARRAY_TO_ARRAY = "NON_ARRAY_TO_ARRAY",
     BOOL_TO_NON_BOOL = "BOOL_TO_NON_BOOL",
@@ -411,6 +408,8 @@ declare enum DiagCode {
     LITERAL_OVERFLOW = "LITERAL_OVERFLOW",
     CANNOT_INFER_TYPE = "CANNOT_INFER_TYPE",
     UNDEFINED_IDENTIFIER = "UNDEFINED_IDENTIFIER",
+    UNDEFINED_IDENTIFIER_MEMBER = "UNDEFINED_IDENTIFIER_MEMBER",// Member access on undefined
+    UNDEFINED_IDENTIFIER_TYPEOF = "UNDEFINED_IDENTIFIER_TYPEOF",// typeof on undefined
     UNDEFINED_BUILTIN = "UNDEFINED_BUILTIN",
     UNDEFINED_FUNCTION = "UNDEFINED_FUNCTION",
     NOT_A_FUNCTION = "NOT_A_FUNCTION",
@@ -444,6 +443,7 @@ declare enum DiagCode {
     SHIFT_OVERFLOW = "SHIFT_OVERFLOW",
     SHIFT_RESULT_OVERFLOW = "SHIFT_RESULT_OVERFLOW",
     ARITHMETIC_OVERFLOW = "ARITHMETIC_OVERFLOW",
+    ARITHMETIC_OVERFLOW_COMPTIME = "ARITHMETIC_OVERFLOW_COMPTIME",// Overflow in comptime
     POTENTIAL_OVERFLOW = "POTENTIAL_OVERFLOW",
     DIVISION_BY_ZERO = "DIVISION_BY_ZERO",
     MODULO_BY_ZERO = "MODULO_BY_ZERO",
@@ -451,8 +451,11 @@ declare enum DiagCode {
     ARITHMETIC_ERROR = "ARITHMETIC_ERROR",
     ARRAY_SIZE_MISMATCH = "ARRAY_SIZE_MISMATCH",
     MUTABILITY_MISMATCH = "MUTABILITY_MISMATCH",
+    MUTABILITY_MISMATCH_POINTER = "MUTABILITY_MISMATCH_POINTER",// Pointer mutability mismatch
     POTENTIAL_PRECISION_LOSS = "POTENTIAL_PRECISION_LOSS",
-    POTENTIAL_DATA_LOSS = "POTENTIAL_DATA_LOSS"
+    POTENTIAL_DATA_LOSS = "POTENTIAL_DATA_LOSS",
+    COMPTIME_EVAL_FAILED = "COMPTIME_EVAL_FAILED",// Comptime evaluation failed
+    COMPTIME_NON_CONST = "COMPTIME_NON_CONST"
 }
 declare enum DiagKind {
     ERROR = "error",
@@ -501,6 +504,7 @@ declare class DiagnosticManager {
     private filterDuplicates;
     private getTargetKey;
     private isSameIssue;
+    private spansOverlap;
 }
 
 /** Abstract phase base class */
@@ -509,12 +513,22 @@ declare abstract class PhaseBase {
     protected readonly config: AnalysisConfig;
     protected constructor(phase: AnalysisPhase, config: AnalysisConfig);
     abstract reset(): void;
-    abstract handle(program: AST.Program): boolean;
+    abstract handle(): boolean;
     abstract logStatistics(): void;
-    reportError(code: DiagCode, message: string, span?: AST.Span): void;
-    reportWarning(code: DiagCode, message: string, span?: AST.Span): void;
-    reportInfo(code: DiagCode, message: string, span?: AST.Span): void;
-    log(kind: DebugKind | undefined, message: string): void;
+    protected reportError(code: DiagCode, message: string, span?: AST.Span): void;
+    protected reportWarning(code: DiagCode, message: string, span?: AST.Span): void;
+    protected reportInfo(code: DiagCode, message: string, span?: AST.Span): void;
+    protected log(kind: "verbose" | "symbols" | "scopes" | "errors" | undefined, message: string): void;
+    /**
+     * Extract getter function for statement node based on its kind.
+     * Returns null if the statement kind is invalid or unsupported.
+     */
+    protected getNodeGetter(stmt: AST.StmtNode): (() => any) | null;
+    /**
+     * Process a statement by delegating to kind-specific handlers.
+     * Returns the result of the handler or null if kind is unsupported.
+    */
+    protected processStmtByKind<T>(stmt: AST.StmtNode, handlers: Partial<Record<AST.StmtNode['kind'], (node: any) => T>>): T | null;
 }
 
 declare class SymbolCollector extends PhaseBase {
@@ -531,33 +545,34 @@ declare class SymbolCollector extends PhaseBase {
     private collectModule;
     private createModuleScope;
     private collectStmt;
-    private processStmt;
-    private getNodeGetter;
-    private handleBlockStatement;
+    private handleBlockStmt;
     private createBlockScope;
     private collectBlockStmt;
     private handleTestStmt;
-    private handleUseStatement;
+    private handleUseStmt;
     private createUseSymbol;
     private collectUseStmt;
     private extractImportSymbolName;
     private processModuleImport;
     private processWildcardImport;
     private processLocalUse;
-    private handleDefStatement;
+    private handleDefStmt;
     private createDefSymbol;
     private collectDefStmt;
-    private handleLetStatement;
+    private handleLetStmt;
     private createLetSymbol;
     private collectLetStmt;
     private extractTypeFromInitializer;
-    private handleFuncStatement;
+    private handleFuncStmt;
+    private determineErrorMode;
+    private extractSelfGroupErrors;
     private createFuncSymbol;
     private createFuncScope;
     private collectFuncStmt;
     private createParamSymbol;
     private collectParams;
     private injectSelfParameter;
+    private injectSelfErrReference;
     private handleLoopStmt;
     private createLoopScope;
     private collectLoopStmt;
@@ -631,8 +646,6 @@ declare class SymbolResolver extends PhaseBase {
     private exitModuleContext;
     private findModuleScope;
     private resolveStmt;
-    private processStmt;
-    private getNodeGetter;
     private handleBlockStmt;
     private resolveBlockStmt;
     private handleTestStmt;
@@ -658,6 +671,8 @@ declare class SymbolResolver extends PhaseBase {
     private resolveVariableInitializer;
     private handleFuncStmt;
     private resolveFuncStmt;
+    private refineErrorMode;
+    private extractSelfGroupErrors;
     private resolveSelfParameter;
     private resolveParameters;
     private resolveParameter;
@@ -681,6 +696,7 @@ declare class SymbolResolver extends PhaseBase {
     private resolvePostfixCall;
     private resolvePostfixArrayAccess;
     private resolvePostfixMemberAccess;
+    private resolveSelfErrMemberAccess;
     private findMemberAccessBaseSymbol;
     private resolveSelfMemberAccess;
     private resolveAs;
@@ -728,8 +744,6 @@ declare class TypeValidator extends PhaseBase {
     private enterModuleContext;
     private exitModuleContext;
     private validateStmt;
-    private processStmt;
-    private getNodeGetter;
     private handleBlockStmt;
     private validateBlockStmt;
     private handleTestStmt;
@@ -738,6 +752,7 @@ declare class TypeValidator extends PhaseBase {
     private handleLetStmt;
     private validateArrayLiteralWithTargetType;
     private validateLetStmt;
+    private isPointerDereference;
     private handleFuncStmt;
     private validateFuncStmt;
     private validateParameter;
@@ -749,7 +764,13 @@ declare class TypeValidator extends PhaseBase {
     private isConstructorExpression;
     private validateDeferStmt;
     private validateThrowStmt;
+    private validateThrowExpression;
+    private isErrorExpression;
+    private isValidErrorExpression;
     private validateThrowType;
+    private isSameErrorType;
+    private getCurrentFunctionSymbol;
+    private extractErrorMemberName;
     private getCurrentFunctionErrorType;
     private inferExpressionType;
     private performTypeInference;
@@ -767,8 +788,22 @@ declare class TypeValidator extends PhaseBase {
     private inferTupleType;
     private inferBinaryType;
     private validateAssignment;
-    private resolveStructFieldSymbol;
     private inferPrefixType;
+    /**
+     * Checks if an expression is an lvalue (has a memory location that can be referenced).
+     *
+     * Lvalues include:
+     * - Variables: x, y, myVar
+     * - Dereferences: ptr.*, arr[0]
+     * - Member access: obj.field, self.x
+     *
+     * Non-lvalues (cannot take address):
+     * - Literals: 42, "hello", true
+     * - Function calls: foo()
+     * - Arithmetic: x + y
+     * - Temporary values
+     */
+    private isLValueExpression;
     private inferPostfixType;
     private inferCallType;
     private validateMemberVisibility;
@@ -779,7 +814,6 @@ declare class TypeValidator extends PhaseBase {
     private inferArrayAccessType;
     private inferMemberAccessType;
     private resolveWildcardMemberAccess;
-    private getFunctionNode;
     private isStaticMemberAccess;
     private resolveMemberOnUnwrappedType;
     private resolveStructMember;
@@ -800,23 +834,15 @@ declare class TypeValidator extends PhaseBase {
     private validateSwitchExhaustiveness;
     private validateArrayAssignment;
     private checkCircularTypeDependency;
-    /**
-     * Check if an expression is a character literal
-     */
     private isCharacterLiteral;
-    /**
-    * Universal character literal validation
-    * Validates that a character literal value fits in the target type
-    * Handles ALL contexts: variables, parameters, fields, arguments, returns, arrays
-    */
     private validateCharacterLiteralCompatibility;
     private validateTypeAssignment;
+    private unwrapParenType;
     private isTypeCompatible;
     private isNumericType;
     private isAnyType;
     private isIntegerType;
     private isStringType;
-    private isAnyErrorType;
     private isErrorType;
     private isSameType;
     private promoteNumericTypes;
@@ -829,26 +855,31 @@ declare class TypeValidator extends PhaseBase {
     private areArrayTypesCompatible;
     private canConvertTypes;
     private validateValueFitsInType;
-    private getTypeBounds;
     private isValidThrowType;
-    private isErrorMemberOfType;
     private extractTypeFromInitializer;
     private extractSymbolFromExpression;
     private extractBuiltinName;
     private extractMemberName;
     private extractEnumVariantName;
     private extractTypeName;
+    /**
+     * Normalizes a type by unwrapping all parentheses while preserving
+     * the original type for span-based error reporting.
+     *
+     * This ensures type comparisons work correctly regardless of parenthesization.
+     */
+    private normalizeType;
     private findModuleScope;
     private findCallTargetSymbol;
     private isBuiltinFunction;
     private isInsideFunctionScope;
-    private isAccessibleFrom;
     private isBoolLiteral;
     private createCacheKey;
     private cacheType;
     private init;
     private initStats;
     private initTypeValidatorContext;
+    private getTypeDisplayName;
     logStatistics(): void;
 }
 

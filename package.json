@@ -1,6 +1,6 @@
 {
 	"name": "@je-es/ast-analyzer",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "A library for analyzing and validating Abstract Syntax Trees.",
 	"keywords": [
 		"je-es",
@@ -47,10 +47,10 @@
 		"typescript-eslint": "^8.42.0"
 	},
 	"dependencies": {
-		"@je-es/ast": "^0.0.1",
+		"@je-es/ast": "^0.0.3",
 		"@je-es/lexer": "^0.1.6",
 		"@je-es/parser": "^0.1.5",
 		"@je-es/syntax": "^0.1.8",
-		"@kemet-lang/rules": "^0.0.3"
+		"@kemet-lang/rules": "^0.0.6"
 	}
 }

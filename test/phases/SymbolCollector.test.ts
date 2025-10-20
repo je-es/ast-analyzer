@@ -1901,7 +1901,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "self can only be used in struct methods"
+                        msg: "self can only be used in instance methods"
                     }
                 ]
             },
@@ -1977,7 +1977,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "self can only be used in struct methods"
+                        msg: "self can only be used in instance methods"
                     }
                 ]
             },
@@ -1997,7 +1997,7 @@
                     {
                         kind: 'error',
                         code: 'UNDEFINED_IDENTIFIER',
-                        msg: "self can only be used in struct methods"
+                        msg: "self can only be used in instance methods"
                     }
                 ]
             },

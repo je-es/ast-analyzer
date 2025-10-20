@@ -6,10 +6,10 @@
 
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
-    import * as AST                             from '@je-es/ast';
-    import { IdGenerator }                      from "./IdGenerator";
-    import { DebugManager }                     from './DebugManager';
-    import { DiagnosticManager}                 from './DiagnosticManager';
+    import * as AST                 from '@je-es/ast';
+    import { IdGenerator }          from "./IdGenerator";
+    import { DebugManager }         from './DebugManager';
+    import { DiagnosticManager}     from './DiagnosticManager';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -88,7 +88,9 @@
             isStatic?       : boolean;      // Static member
             isAbstract?     : boolean;      // Abstract member
             isBuiltin?      : boolean;      // Built-in symbol
-            [key: string]   : unknown;      // Other metadata
+            errorMode?      : 'err-ident' | 'err-group' | 'any-error' | 'self-group';
+            selfGroupErrors?: string[];     // Only for self-group mode
+            [key: string]   : unknown;
         };
 
         // Import/Export metadata
@@ -100,8 +102,7 @@
         exportAlias?    : string;       // Export alias
     }
 
-
-    interface BuiltinSymbolOption {
+    export interface BuiltinSymbolOption {
         type            : AST.TypeNode | null
     }
 
@@ -113,7 +114,9 @@
 
     export class ScopeManager {
 
-        // ┌──────────────────────────────── INIT ──────────────────────────────┐
+        // ┌──────────────────────────────── INIT ────────────────────────────────┐
+
+            private static readonly SYMBOL_PROXIMITY_THRESHOLD = 1000;
 
             private scopes!             : Map<ScopeId, Scope>;
             private currentScope!       : ScopeId;
@@ -204,7 +207,7 @@
                     `→ Entering scope ${scopeId} (${this.getScope(scopeId).name}) from ${previousScope}`
                 );
 
-                this.setCurrentScope(scopeId);
+                this.currentScope = scopeId;
 
                 try {
                     return fn();
@@ -212,7 +215,7 @@
                     this.debugManager?.log('verbose',
                         `← Restoring scope ${previousScope} from ${scopeId}`
                     );
-                    this.setCurrentScope(previousScope);
+                    this.currentScope = previousScope;
                 }
             }
 
@@ -220,43 +223,55 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌──────────────────────────────── MAIN ────────────────────────────────┐
 
-            findScopeByName(name: string, kind?: ScopeKind): Scope | null {
+            /**
+             * Find a scope by name, optionally filtered by kind.
+             * @param name - The scope name to search for
+             * @param kind - Optional: Filter by scope kind
+             * @param parentScopeId - Optional: Search only within this parent scope's children
+             */
+            findScopeByName(name: string, kind?: ScopeKind, parentScopeId?: ScopeId): Scope | null {
+                if (parentScopeId !== undefined) {
+                    // Search only in children of specified parent
+                    const parentScope = this.getScope(parentScopeId);
+                    for (const childId of parentScope.children) {
+                        const childScope = this.getScope(childId);
+                        if (childScope.name === name && (!kind || childScope.kind === kind)) {
+                            return childScope;
+                        }
+                    }
+                    return null;
+                }
+
+                // Global search through all scopes
                 for (const scope of this.scopes.values()) {
-                    if (scope.name === name && (kind ? scope.kind === kind : true)) {
+                    if (scope.name === name && (!kind || scope.kind === kind)) {
                         return scope;
                     }
                 }
                 return null;
             }
 
+            /**
+             * Find a child scope of the current scope by name.
+             */
             findChildScopeByName(name: string, kind?: ScopeKind): Scope | null {
-                const currentScope = this.getScope(this.currentScope);
-                for (const childId of currentScope.children) {
-                    const childScope = this.getScope(childId);
-                    if (childScope.name === name && (kind ? childScope.kind === kind : true)) {
-                        return childScope;
-                    }
-                }
-                return null;
+                return this.findScopeByName(name, kind, this.currentScope);
             }
 
+            /**
+             * Find a child scope by name from a specific parent scope.
+             */
             findChildScopeByNameFromId(name: string, scopeId: ScopeId, kind?: ScopeKind): Scope | null {
-                const scope = this.getScope(scopeId);
-                for (const childId of scope.children) {
-                    const childScope = this.getScope(childId);
-                    if (childScope.name === name && (kind ? childScope.kind === kind : true)) {
-                        return childScope;
-                    }
-                }
-                return null;
+                return this.findScopeByName(name, kind, scopeId);
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌─────────────────────────── SCOPE ACCESSORS ──────────────────────────┐
+
 
             getSymbolInCurrentScope(name: string): Symbol | null {
                 const currentScope = this.getScope(this.currentScope);
@@ -300,14 +315,6 @@
                 return Array.from(this.scopes.values());
             }
 
-            enterScopeById(scopeId: ScopeId): void {
-                this.currentScope = scopeId;
-            }
-
-            getCurrentScopeId(): ScopeId {
-                return this.currentScope;
-            }
-
             setCurrentScope(scopeId: ScopeId): void {
                 if (!this.scopes.has(scopeId)) {
                     throw new Error(`Scope ${scopeId} does not exist`);
@@ -324,7 +331,7 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌────────────────────────── SCOPE NAVIGATION ──────────────────────────┐
 
             enterScope(kind: ScopeKind, name: string): ScopeId {
                 const scope = this.createScope(kind, name, this.currentScope);
@@ -342,14 +349,10 @@
                 return null;
             }
 
-            removeScope(scopeId: ScopeId): void {
-                this.scopes.delete(scopeId);
-            }
-
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌────────────────────────── SCOPE DEFINITION ──────────────────────────┐
 
             defineSymbol(name: string, kind: SymbolKind, opts: {
                 type?: AST.TypeNode,
@@ -433,95 +436,70 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
 
             private initializeBuiltins(): void {
-                // functions
-                this.createBuiltinSymbol('func', '@print', {
+                // Functions
+                this.createBuiltinSymbol(SymbolKind.Function, '@print', {
                     type: AST.TypeNode.asFunction({start: 0, end: 0}, [
                             AST.TypeNode.asU8Array({start: 0, end: 0})
-                    ], AST.TypeNode.asVoid({start: 0, end: 0}))
-                })
+                    ], AST.TypeNode.asVoid({start: 0, end: 0})),
+                    callable: true
+                });
 
-                // types
-                this.createBuiltinSymbol('type', 'slice', {
+                // Types
+                this.createBuiltinSymbol(SymbolKind.Definition, 'slice', {
                     type: AST.TypeNode.asU8Array({start: 0, end: 0})
-                })
-                this.createBuiltinSymbol('type', 'char', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u8', 8),
-                })
-                this.createBuiltinSymbol('type', 'cpoint', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u21', 21),
-                })
-                this.createBuiltinSymbol('type', 'usize', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64),
-                })
-                this.createBuiltinSymbol('type', 'isize', {
-                    type: AST.TypeNode.asSigned({start: 0, end: 0}, 'isize', 64),
-                })
+                });
+                this.createBuiltinSymbol(SymbolKind.Definition, 'char', {
+                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u8', 8)
+                });
+                this.createBuiltinSymbol(SymbolKind.Definition, 'cpoint', {
+                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u21', 21)
+                });
+                this.createBuiltinSymbol(SymbolKind.Definition, 'usize', {
+                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)
+                });
+                this.createBuiltinSymbol(SymbolKind.Definition, 'isize', {
+                    type: AST.TypeNode.asSigned({start: 0, end: 0}, 'isize', 64)
+                });
             }
 
-            private createBuiltinSymbol(kind: 'func' | 'type', name: string, options: BuiltinSymbolOption = { type: null}) : Symbol {
-                if(kind == 'func') {
-                    const symbol: Symbol = {
-                        id: this.symbolIdGenerator.next(),
-                        kind: SymbolKind.Function,
-                        name: name,
-                        contextSpan: { start: 0, end: 0 },
-                        scope: this.globalScope.id,
-                        visibility: { kind: 'Public' },
-                        mutability: { kind: 'Immutable'},
-                        type: options.type,
-                        used: false,
-                        initialized: true,
-                        declared: true,
-                        isTypeChecked: true,
-                        isExported: false,
-                        metadata: {
-                            callable: true,
-                            isBuiltin: true
-                        }
-                    };
+            private createBuiltinSymbol(
+                kind: SymbolKind,
+                name: string,
+                options: { type: AST.TypeNode | null; callable?: boolean }
+            ): Symbol {
+                const symbol: Symbol = {
+                    id: this.symbolIdGenerator.next(),
+                    kind,
+                    name,
+                    contextSpan: { start: 0, end: 0 },
+                    scope: this.globalScope.id,
+                    visibility: { kind: 'Public' },
+                    mutability: { kind: 'Immutable'},
+                    type: options.type,
+                    used: false,
+                    initialized: true,
+                    declared: true,
+                    isTypeChecked: true,
+                    isExported: false,
+                    metadata: {
+                        callable: options.callable || false,
+                        isBuiltin: true
+                    }
+                };
 
-                    this.globalScope.symbols.set(name, symbol);
-                    this.symbolTable.set(symbol.id, symbol);
+                this.globalScope.symbols.set(name, symbol);
+                this.symbolTable.set(symbol.id, symbol);
 
-                    return symbol;
-                }
-
-                else if(kind == 'type') {
-                    const symbol: Symbol = {
-                        id: this.symbolIdGenerator.next(),
-                        kind: SymbolKind.Definition,
-                        name: name,
-                        contextSpan: { start: 0, end: 0 },
-                        scope: this.globalScope.id,
-                        visibility: { kind: 'Public' },
-                        mutability: { kind: 'Immutable'},
-                        type: options.type,
-                        used: false,
-                        initialized: true,
-                        declared: true,
-                        isTypeChecked: true,
-                        isExported: false,
-                        metadata: {
-                            isBuiltin: true
-                        }
-                    };
-
-                    this.globalScope.symbols.set(name, symbol);
-                    this.symbolTable.set(symbol.id, symbol);
-
-                    return symbol;
-                }
-
-                throw new Error("Unreachable");
+                return symbol;
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌─────────────────────────── SYMBOL MARKERS ───────────────────────────┐
 
             markSymbolUsed(symbolId: SymbolId): void {
                 const symbol = this.getSymbol(symbolId);
@@ -546,30 +524,17 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
-
-            getNamespaceSymbols(namespace: string): Symbol[] {
-                const nsSymbols = this.namespaceLookup.get(namespace);
-                if (!nsSymbols) {
-                    return [];
-                }
-
-                return Array.from(nsSymbols).map(id => this.getSymbol(id));
-            }
+        // ┌───────────────────────── NAMESPACE QUERIES ──────────────────────────┐
 
             getAllSymbolsInScope(scopeId: ScopeId): Symbol[] {
                 const scope = this.getScope(scopeId);
                 return Array.from(scope.symbols.values());
             }
 
-            getAllNamespaces(): string[] {
-                return Array.from(this.namespaceLookup.keys());
-            }
-
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌────────────────────────── SYMBOL LOOKUP ─────────────────────────────┐
 
             /**
              * Look up a symbol in the current scope chain.
@@ -625,9 +590,8 @@
                 }
 
                 // STEP 4: Only check global scope for imports and built-ins
-                const globalScope = this.scopes.get(1); // Global scope is always ID 1
-                if (globalScope) {
-                    const globalSymbol = globalScope.symbols.get(name);
+                if (this.globalScope) {
+                    const globalSymbol = this.globalScope.symbols.get(name);
                     if (globalSymbol) {
                         // Only return if it's a Use (import) or built-in
                         if (globalSymbol.kind === SymbolKind.Use ||
@@ -655,7 +619,7 @@
         // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+        // ┌─────────────────────────── LSP SUPPORT ──────────────────────────────┐
 
             /**
              * Look up a symbol from LSP position information.
@@ -667,7 +631,9 @@
              * @returns The symbol if found, null otherwise
              */
             lookupSymbolFromLSP(word: string, position_span: AST.Span, moduleName?: string): Symbol | null {
-                console.log(`[ScopeManager] LSP lookup for "${word}" at span ${JSON.stringify(position_span)}${moduleName ? ` in module "${moduleName}"` : ''}`);
+                this.debugManager?.log('verbose',
+                    `LSP lookup for "${word}" at span ${JSON.stringify(position_span)}${moduleName ? ` in module "${moduleName}"` : ''}`
+                );
 
                 // STEP 1: If module name provided, find that specific module scope
                 let searchScope: Scope | null = null;
@@ -677,26 +643,20 @@
                     for (const scope of this.scopes.values()) {
                         if (scope.kind === ScopeKind.Module && scope.name === moduleName) {
                             searchScope = scope;
-                            console.log(`[ScopeManager] Restricted search to module: ${moduleName} (id: ${scope.id})`);
+                            this.debugManager?.log('verbose', `Restricted search to module: ${moduleName} (id: ${scope.id})`);
                             break;
                         }
                     }
 
                     if (!searchScope) {
-                        console.warn(`[ScopeManager] Module "${moduleName}" not found`);
+                        this.debugManager?.log('errors', `Module "${moduleName}" not found`);
                         return null;
                     }
 
                     // Check if position is within an import statement first
                     const importSymbol = this.findImportAtPosition(position_span, searchScope);
                     if (importSymbol) {
-                        console.log(`[ScopeManager] Position is within import statement`);
-                        console.log(`[ScopeManager] Import symbol name: ${importSymbol.name}, alias: ${importSymbol.importAlias || 'none'}`);
-                        console.log(`[ScopeManager] Looking for word: "${word}"`);
-
-                        // Hovering anywhere in "use x as sdsdsds from ..." should show what 'x' is from other module
-                        // So always resolve the import to show the source symbol
-                        console.log(`[ScopeManager] Resolving import to source symbol`);
+                        this.debugManager?.log('verbose', `Position is within import statement, resolving to source symbol`);
                         return this.resolveSymbolThroughImports(importSymbol);
                     }
 
@@ -709,36 +669,57 @@
                 }
 
                 if (!searchScope) {
-                    console.log(`[ScopeManager] No scope found at position`);
+                    this.debugManager?.log('verbose', `No scope found at position`);
                     return null;
                 }
 
-                console.log(`[ScopeManager] Found search scope: ${searchScope.name} (kind: ${searchScope.kind}, id: ${searchScope.id})`);
+                this.debugManager?.log('verbose',
+                    `Found search scope: ${searchScope.name} (kind: ${searchScope.kind}, id: ${searchScope.id})`
+                );
 
                 // STEP 2: Search for the symbol starting from the search scope
                 const symbol = this.lookupSymbolInScopeChain(word, searchScope.id);
 
                 if (!symbol) {
-                    console.log(`[ScopeManager] Symbol "${word}" not found in scope chain`);
+                    this.debugManager?.log('verbose', `Symbol "${word}" not found in scope chain`);
                     return null;
                 }
 
-                console.log(`[ScopeManager] Found symbol: ${symbol.name} (kind: ${symbol.kind})`);
+                this.debugManager?.log('verbose', `Found symbol: ${symbol.name} (kind: ${symbol.kind})`);
 
                 // Check if cursor is on the import statement itself or on usage
                 if (symbol.kind === SymbolKind.Use) {
                     const isOnImportStatement = this.isPositionOnSymbolDefinition(position_span, symbol);
 
                     if (isOnImportStatement) {
-                        console.log(`[ScopeManager] Position is ON import statement, returning Use symbol`);
+                        this.debugManager?.log('verbose', `Position is ON import statement, returning Use symbol`);
                         return symbol; // Show the import itself
                     } else {
-                        console.log(`[ScopeManager] Position is on USAGE of imported symbol, resolving to source`);
+                        this.debugManager?.log('verbose', `Position is on USAGE of imported symbol, resolving to source`);
                         return this.resolveSymbolThroughImports(symbol); // Show what it imports
                     }
                 }
 
                 return symbol;
+            }
+
+            /**
+            * Public method to get symbol at a specific position (used by LSP).
+            * This checks if the position directly points to a symbol definition.
+            */
+            getSymbolAtPosition(position: AST.Span): Symbol | null {
+                // First, try to find if the position directly points to a symbol
+                for (const symbol of this.symbolTable.values()) {
+                    const targetSpan = symbol.targetSpan || symbol.contextSpan;
+
+                    // Check if position is exactly on this symbol
+                    if (position.start >= targetSpan.start && position.start <= targetSpan.end) {
+                        this.debugManager?.log('verbose', `Found symbol directly at position: ${symbol.name}`);
+                        return symbol;
+                    }
+                }
+
+                return null;
             }
 
             /**
@@ -752,7 +733,9 @@
                         const contextSpan = symbol.contextSpan;
                         // Check if position is within this import statement
                         if (position.start >= contextSpan.start && position.start <= contextSpan.end) {
-                            console.log(`[ScopeManager] Found position within import: ${symbol.name} (alias: ${symbol.importAlias || 'none'}, context: ${contextSpan.start}-${contextSpan.end})`);
+                            this.debugManager?.log('verbose',
+                                `Found position within import: ${symbol.name} (alias: ${symbol.importAlias || 'none'})`
+                            );
                             return symbol;
                         }
                     }
@@ -769,27 +752,13 @@
                 // because the import statement spans across "use x from ..."
                 if (symbol.kind === SymbolKind.Use) {
                     const contextSpan = symbol.contextSpan;
-                    const targetSpan = symbol.targetSpan;
-
-                    // Check if position is anywhere within the import statement (contextSpan)
                     const isInContext = position.start >= contextSpan.start && position.start <= contextSpan.end;
-
-                    console.log(`[ScopeManager] Checking Use symbol ${symbol.name}:`);
-                    console.log(`  - position: ${position.start}-${position.end}`);
-                    console.log(`  - contextSpan: ${contextSpan.start}-${contextSpan.end}`);
-                    console.log(`  - targetSpan: ${targetSpan?.start}-${targetSpan?.end}`);
-                    console.log(`  - isInContext: ${isInContext}`);
-
                     return isInContext;
                 }
 
                 // For other symbols, check target span only
                 const targetSpan = symbol.targetSpan || symbol.contextSpan;
-                const isOnTarget = position.start >= targetSpan.start && position.start <= targetSpan.end;
-
-                console.log(`[ScopeManager] Checking if position ${position.start}-${position.end} is on definition of ${symbol.name} (target: ${targetSpan.start}-${targetSpan.end}): ${isOnTarget}`);
-
-                return isOnTarget;
+                return position.start >= targetSpan.start && position.start <= targetSpan.end;
             }
 
             /**
@@ -1009,25 +978,6 @@
                 if (bestMatch) {
                     console.log(`[ScopeManager] Found scope by proximity: ${bestMatch.scope.name} (closest symbol: ${bestMatch.symbol.name}, distance: ${bestMatch.distance})`);
                     return bestMatch.scope;
-                }
-
-                return null;
-            }
-
-            /**
-            * Public method to get symbol at a specific position (used by LSP).
-            * This checks if the position directly points to a symbol definition.
-            */
-            getSymbolAtPosition(position: AST.Span): Symbol | null {
-                // First, try to find if the position directly points to a symbol
-                for (const symbol of this.symbolTable.values()) {
-                    const targetSpan = symbol.targetSpan || symbol.contextSpan;
-
-                    // Check if position is exactly on this symbol
-                    if (position.start >= targetSpan.start && position.start <= targetSpan.end) {
-                        console.log(`[ScopeManager] Found symbol directly at position: ${symbol.name}`);
-                        return symbol;
-                    }
                 }
 
                 return null;

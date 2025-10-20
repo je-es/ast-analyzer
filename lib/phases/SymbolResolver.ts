@@ -214,7 +214,24 @@
                     this.config.services.scopeManager.withScope(currentScope.id, () => {
                         this.config.services.contextTracker.withSavedState(() => {
                             this.config.services.contextTracker.setScope(currentScope.id);
-                            this.processStmt(stmt, currentScope, moduleName);
+                            this.processStmtByKind(stmt, {
+                                'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
+                                'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
+                                'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
+                                'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
+                                'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
+                                'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
+                                'Expression': (exprNode)  => this.resolveExprStmt(exprNode),
+
+                                // special cases
+                                'While'     : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'Do'        : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'For'       : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+
+                                'Return'    : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Defer'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'Throw'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                            });
                         });
                     });
                 } catch (error) {
@@ -225,69 +242,6 @@
                     );
                 } finally {
                     this.config.services.contextTracker.popContextSpan();
-                }
-            }
-
-            private processStmt(stmt: AST.StmtNode, currentScope: Scope, moduleName?: string): void {
-                const nodeGetter = this.getNodeGetter(stmt);
-                if (!nodeGetter) {
-                    this.reportError(DiagCode.INTERNAL_ERROR, `Invalid AST: ${stmt.kind} node is null`);
-                    return;
-                }
-
-                switch (stmt.kind) {
-                    case 'Block':
-                        this.handleBlockStmt(stmt.getBlock()!, currentScope, moduleName);
-                        break;
-                    case 'Test':
-                        this.handleTestStmt(stmt.getTest()!, currentScope, moduleName);
-                        break;
-                    case 'Use':
-                        this.handleUseStmt(stmt.getUse()!, currentScope, moduleName);
-                        break;
-                    case 'Def':
-                        this.handleDefStmt(stmt.getDef()!, currentScope, moduleName);
-                        break;
-                    case 'Let':
-                        this.handleLetStmt(stmt.getLet()!, currentScope, moduleName);
-                        break;
-                    case 'Func':
-                        this.handleFuncStmt(stmt.getFunc()!, currentScope, moduleName);
-                        break;
-                    case 'While':
-                    case 'Do':
-                    case 'For':
-                        this.handleLoopStmt(stmt, currentScope, moduleName);
-                        break;
-                    case 'Return':
-                    case 'Defer':
-                    case 'Throw':
-                        this.handleControlflowStmt(stmt, currentScope, moduleName);
-                        break;
-                    case 'Expression':
-                        this.resolveExprStmt(stmt.getExpr()!);
-                        break;
-                }
-            }
-
-            private getNodeGetter(stmt: AST.StmtNode): (() => any) | null {
-                switch (stmt.kind) {
-                    case 'Def'          : return () => stmt.getDef();
-                    case 'Use'          : return () => stmt.getUse();
-                    case 'Let'          : return () => stmt.getLet();
-                    case 'Func'         : return () => stmt.getFunc();
-                    case 'Block'        : return () => stmt.getBlock();
-                    case 'Return'       : return () => stmt.getReturn();
-                    case 'Defer'        : return () => stmt.getDefer();
-                    case 'Throw'        : return () => stmt.getThrow();
-                    case 'Expression'   : return () => stmt.getExpr();
-                    case 'While'        :
-                    case 'Do'           :
-                    case 'For'          : return () => stmt.getLoop();
-                    case 'Break'        : return () => stmt.getBreak();
-                    case 'Continue'     : return () => stmt.getContinue();
-                    case 'Test'         : return () => stmt.getTest();
-                    default             : return null;
                 }
             }
 
@@ -635,12 +589,12 @@
 
             private propagateImportType(useNode: AST.UseStmtNode, targetSymbol: Symbol, originalScope: Scope): void {
                 // Handle both wildcard and specific imports
-                const importName = useNode.alias 
-                    ? useNode.alias.name 
-                    : useNode.targetArr 
+                const importName = useNode.alias
+                    ? useNode.alias.name
+                    : useNode.targetArr
                         ? useNode.targetArr[useNode.targetArr.length - 1].name
                         : '<invalid>';
-                
+
                 if (!importName || importName === '<invalid>') return;
 
                 const importSymbol = originalScope.symbols.get(importName);
@@ -891,10 +845,10 @@
                 );
                 funcSymbol.declared = true;
 
-                // FIXED: Get the scope where the function is defined to check if it's in a struct
+                // Get the scope where the function is defined to check if it's in a struct
                 const funcSymbolScope = this.config.services.scopeManager.getScope(funcSymbol.scope);
-                const parentScope = funcSymbolScope.parent !== null 
-                    ? this.config.services.scopeManager.getScope(funcSymbolScope.parent) 
+                const parentScope = funcSymbolScope.parent !== null
+                    ? this.config.services.scopeManager.getScope(funcSymbolScope.parent)
                     : null;
 
                 const isStaticMethod = parentScope?.kind === ScopeKind.Type &&
@@ -1002,10 +956,21 @@
 
                                 if (!this.resolveType(funcNode.errorType, tempErrorSymbol, funcNode.span)) {
                                     funcSymbol.isTypeChecked = true;
-                                    return; // Exit if error type resolution fails
+                                    return;
                                 }
 
-                                // Validate the error type identifier exists and is an error type
+                                // REFINE ERROR MODE after resolution
+                                const refinedMode = this.refineErrorMode(funcNode.errorType, funcSymbol);
+                                if (funcSymbol.metadata) {
+                                    funcSymbol.metadata.errorMode = refinedMode;
+
+                                    // Update self-group errors if needed
+                                    if (refinedMode === 'self-group') {
+                                        funcSymbol.metadata.selfGroupErrors = this.extractSelfGroupErrors(funcNode.errorType);
+                                    }
+                                }
+
+                                // Validate identifier error types
                                 if (funcNode.errorType.isIdent()) {
                                     const errorIdent = funcNode.errorType.getIdent()!;
 
@@ -1023,7 +988,7 @@
                                         }
 
                                         // Validate it's actually an error type
-                                        if (errorSymbol.type && !errorSymbol.type.isErrset()) {
+                                        if (errorSymbol.type && !errorSymbol.type.isErrset() && !errorSymbol.type.isErr()) {
                                             this.reportError(
                                                 DiagCode.TYPE_MISMATCH,
                                                 `'${errorIdent.name}' is not an error type`,
@@ -1068,6 +1033,40 @@
 
                 funcSymbol.isTypeChecked = true;
                 this.stats.resolvedSymbols++;
+            }
+
+            private refineErrorMode(
+                errorType: AST.TypeNode,
+                funcSymbol: Symbol
+            ): 'err-ident' | 'err-group' | 'any-error' | 'self-group' {
+                if (errorType.isErr()) {
+                    return 'any-error';
+                }
+
+                if (errorType.isErrset()) {
+                    return 'self-group';
+                }
+
+                if (errorType.isIdent()) {
+                    const ident = errorType.getIdent()!;
+                    const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+
+                    if (symbol?.kind === SymbolKind.Variable && symbol.type?.isErr()) {
+                        return 'err-ident';
+                    }
+
+                    if (symbol?.kind === SymbolKind.Definition && symbol.type?.isErrset()) {
+                        return 'err-group';
+                    }
+                }
+
+                return 'any-error';
+            }
+
+            private extractSelfGroupErrors(errorType: AST.TypeNode): string[] {
+                if (!errorType.isErrset()) return [];
+                const errset = errorType.getErrset()!;
+                return errset.members.map(m => m.name);
             }
 
             private resolveSelfParameter(funcScope: Scope, structScope: Scope): void {
@@ -1499,6 +1498,18 @@
             private resolvePostfixMemberAccess(memberAccess: AST.MemberAccessNode, contextSpan?: AST.Span, parameterContext?: FieldContext): void {
                 this.log('symbols', 'Resolving member access');
 
+                // CHECK FOR selferr.Member access
+                if (memberAccess.base.is('Primary')) {
+                    const primary = memberAccess.base.getPrimary();
+                    if (primary?.is('Ident')) {
+                        const ident = primary.getIdent();
+                        if (ident?.name === 'selferr') {
+                            this.resolveSelfErrMemberAccess(memberAccess);
+                            return;
+                        }
+                    }
+                }
+
                 // SPECIAL CASE: 'self.member' in static method
                 if (memberAccess.base.is('Primary')) {
                     const primary = memberAccess.base.getPrimary();
@@ -1547,6 +1558,70 @@
                 }
 
                 this.stats.memberAccessResolved++;
+            }
+
+            private resolveSelfErrMemberAccess(memberAccess: AST.MemberAccessNode): void {
+                const selfErrSymbol = this.config.services.scopeManager.lookupSymbol('selferr');
+
+                if (!selfErrSymbol || !selfErrSymbol.metadata?.isSelfErr) {
+                    this.reportError(
+                        DiagCode.UNDEFINED_IDENTIFIER,
+                        "selferr can only be used in functions with self-group error type",
+                        memberAccess.base.span
+                    );
+                    return;
+                }
+
+                // Extract member name (the error variant)
+                if (!memberAccess.target.is('Primary')) {
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        'Expected error member name after selferr',
+                        memberAccess.target.span
+                    );
+                    return;
+                }
+
+                const targetPrimary = memberAccess.target.getPrimary();
+                if (!targetPrimary?.is('Ident')) {
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        'Expected error member name after selferr',
+                        memberAccess.target.span
+                    );
+                    return;
+                }
+
+                const errorMemberName = targetPrimary.getIdent()!.name;
+
+                // Validate the member exists in the error set
+                const errorType = selfErrSymbol.type;
+                if (!errorType || !errorType.isErrset()) {
+                    this.reportError(
+                        DiagCode.INTERNAL_ERROR,
+                        'selferr does not reference a valid error set',
+                        memberAccess.span
+                    );
+                    return;
+                }
+
+                const errset = errorType.getErrset()!;
+                const memberExists = errset.members.some(m => m.name === errorMemberName);
+
+                if (!memberExists) {
+                    this.reportError(
+                        DiagCode.ERROR_MEMBER_NOT_FOUND,
+                        `Error member '${errorMemberName}' not found in function's error set`,
+                        memberAccess.target.span
+                    );
+                    return;
+                }
+
+                // Mark as resolved and used
+                selfErrSymbol.used = true;
+                this.stats.memberAccessResolved++;
+
+                this.log('symbols', `Resolved selferr.${errorMemberName}`);
             }
 
             private findMemberAccessBaseSymbol(baseExpr: AST.ExprNode): Symbol | null {
@@ -1797,12 +1872,12 @@
                         return;
                     }
 
-                    // Handle 'self' FIRST, before standard lookup
+                    // Handle 'self' FIRST
                     if (ident.name === 'self') {
-                        // In static methods, 'self' is allowed (refers to the TYPE)
+                        // ALLOW in static methods (refers to the type)
                         if (this.currentIsStaticMethod && this.currentStructScope) {
                             // Don't lookup symbol - it doesn't exist for static methods
-                            // Just mark as resolved, validation happens in TypeValidator
+                            // Just mark as resolved, member access validation happens in TypeValidator
                             this.stats.resolvedSymbols++;
                             this.config.services.contextTracker.popContextSpan();
                             return;
@@ -1817,19 +1892,10 @@
                             return;
                         }
 
-                        // // In static methods, 'self' is allowed (refers to the TYPE)
-                        // if (this.currentStructScope) {
-                        //     // Don't lookup symbol - it doesn't exist for static methods
-                        //     // Just mark as resolved, validation happens in TypeValidator
-                        //     this.stats.resolvedSymbols++;
-                        //     this.config.services.contextTracker.popContextSpan();
-                        //     return;
-                        // }
-
                         // If neither, it's an error
                         this.reportError(
                             DiagCode.UNDEFINED_IDENTIFIER,
-                            "self can only be used in struct methods",
+                            "self can only be used in instance methods",
                             ident.span
                         );
                         this.config.services.contextTracker.popContextSpan();
@@ -1982,14 +2048,19 @@
                     case 'pointer': {
                         const pointer = typeNode.getPointer()!;
 
-                        // ADDED: Validate pointer target is a type identifier, not a variable
-                        if (pointer.target.isIdent()) {
-                            const targetIdent = pointer.target.getIdent()!;
+                        // Normalize the target to remove parens before validation
+                        let targetType = pointer.target;
+                        while (targetType.isParen()) {
+                            targetType = targetType.getParen()!.type;
+                        }
+
+                        // Validate pointer target is a type identifier, not a variable
+                        if (targetType.isIdent()) {
+                            const targetIdent = targetType.getIdent()!;
 
                             if (!targetIdent.builtin) {
                                 const targetSymbol = this.config.services.scopeManager.lookupSymbol(targetIdent.name);
 
-                                // If target is a variable/parameter (not a type), this is likely a syntax error
                                 if (targetSymbol &&
                                     (targetSymbol.kind === SymbolKind.Variable ||
                                     targetSymbol.kind === SymbolKind.Parameter)) {
@@ -2190,8 +2261,8 @@
                     }
 
                     case 'errset':
-                        // Resolve error members - FIXED
-                        const errorType = typeNode.getError()!;
+                        // Resolve error members
+                        const errorType = typeNode.getErrset()!;
                         for (const errorMember of errorType.members) {
                             // Error members are just identifiers - mark them as resolved
                             const errorSymbol = this.config.services.scopeManager.lookupSymbol(errorMember.name);
@@ -2284,7 +2355,7 @@
                                     }
 
                                     // Validate it's actually an error type
-                                    if (errorSymbol.type && !errorSymbol.type.isErrset()) {
+                                    if (errorSymbol.type && !errorSymbol.type.isErrset() && !errorSymbol.type.isErr()) {
                                         this.reportError(
                                             DiagCode.TYPE_MISMATCH,
                                             `'${errorIdent.name}' is not an error type`,

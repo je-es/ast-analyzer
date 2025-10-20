@@ -45,21 +45,22 @@
 
         pub let VERSION: i32 = 1;
 
-        pub fn print(x: []u8) { }
-        pub fn println(x: []u8) {}
+        pub fn print(_x: []u8) { }
+        pub fn println(_x: []u8) {}
 
         pub def utils = struct {
-            static fn print(x: []u8) -> void { }
+            static fn print(_x: []u8) -> void { }
         };
 
         pub def Point = struct { x: i32; y: i32 };
 
         let private_var : bool = true;
+        let _use_private_var = private_var;
 
         pub def Color = enum { Red, Green, Blue };
 
         pub def Printer = struct {
-            static fn print(x: []u8) {}
+            static fn print(_x: []u8) {}
         };
         `;
         const printModuleParserResult : ParseLib.ParseResult = syntax.parse(printModuleInput);
@@ -179,8 +180,8 @@
 
                 // TODO: improve this error code and msg (in SemanticValidator).
                 expect(result.success).toEqual(false);
-                expect(result.diagnostics[0].msg).toEqual("Program contains no modules");
-                expect(result.diagnostics[0].code).toEqual("MODULE_NOT_FOUND");
+                expect(result.diagnostics[0].msg).toEqual("Invalid program structure");
+                expect(result.diagnostics[0].code).toEqual("ANALYSIS_ERROR");
                 expect(result.diagnostics[0].kind).toEqual("error");
             });
         });

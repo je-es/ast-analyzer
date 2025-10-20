@@ -12,8 +12,21 @@
 
     - fix : `''` must be more smart to handle/accept `char(u8)` and `cpoint(u21)`.
 
-- # Current
+    - fix : improve error types and throw mechanism.
 
+    - fix : in function symbol metadata, add error type mode.
+
+    - add : `selferr`
+
+    - fix : [BUG] "TYPE_MISMATCH" "Float literals not allowed in integer-only context" in `let opt_float: ?f32 = 3.14;`
+
+    - fix : [BUG] comptime handling, example: `comptime fn get_size() -> i32 { return 10; } let arr: [get_size()]i32;`
+
+    - fix : [BUG] static must be immutable
+
+    - a lot of bugs related to : `static`, `mut`, `optional`, `pointers`, `diag manager filter`, ... fixed.
+
+- # Current
 
 - # Later
 
@@ -21,7 +34,4 @@
 
     - add `std` lib.
 
-    - currently, we handle `errset { x, y }` x and y as Ident, but what about TypeNode.asErr(span, "x") ?
-
     - impl meta/builtin `@..`
-
