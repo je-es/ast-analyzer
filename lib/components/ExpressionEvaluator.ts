@@ -825,48 +825,90 @@
                     return null;
                 }
 
-                const isComptimeFunc = functionSymbol.metadata?.isComptimeFunction === true;
+                // Handle function pointer variables
+                let targetSymbol = functionSymbol;
+
+                if (functionSymbol.kind === SymbolKind.Variable) {
+                    // Check if variable holds a reference to a comptime function
+                    if (functionSymbol.metadata?.initializer) {
+                        const initExpr = functionSymbol.metadata.initializer as AST.ExprNode;
+
+                        // If initializer is an identifier, resolve it
+                        if (initExpr.is('Primary')) {
+                            const primary = initExpr.getPrimary();
+                            if (primary?.is('Ident')) {
+                                const targetIdent = primary.getIdent()!;
+                                const resolvedSymbol = this.config.services.scopeManager.lookupSymbol(targetIdent.name);
+
+                                if (resolvedSymbol) {
+                                    // Check if the target is a comptime function
+                                    if (resolvedSymbol.kind === SymbolKind.Function &&
+                                        resolvedSymbol.metadata?.isComptimeFunction === true) {
+                                        // Variable holds a comptime function - use it!
+                                        targetSymbol = resolvedSymbol;
+                                        this.log('verbose',
+                                            `[Comptime] Resolved function pointer '${functionSymbol.name}' to comptime function '${resolvedSymbol.name}'`
+                                        );
+                                    } else {
+                                        // Variable holds a non-comptime function - cannot evaluate at compile-time
+                                        return null;
+                                    }
+                                } else {
+                                    return null;
+                                }
+                            } else {
+                                return null; // Complex initializer
+                            }
+                        } else {
+                            return null; // Not a simple identifier
+                        }
+                    } else {
+                        return null; // No initializer metadata
+                    }
+                }
+
+                const isComptimeFunc = targetSymbol.metadata?.isComptimeFunction === true;
 
                 if (!isComptimeFunc) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        `Cannot call non-comptime function '${functionSymbol.name}' in compile-time context. Mark it with 'comptime' keyword.`,
+                        `Cannot call non-comptime function '${targetSymbol.name}' in compile-time context. Mark it with 'comptime' keyword.`,
                         call.base.span
                     );
                     return null;
                 }
 
                 // Create cache key including arguments
-                const cacheKey = this.createComptimeCacheKey(functionSymbol, call.args, ctx);
+                const cacheKey = this.createComptimeCacheKey(targetSymbol, call.args, ctx);
                 const cached = this.comptimeResultCache.get(cacheKey);
 
                 if (cached) {
                     this.log('verbose',
-                        `[Comptime] Using cached result for '${functionSymbol.name}': ${cached.value} (${cached.type})`
+                        `[Comptime] Using cached result for '${targetSymbol.name}': ${cached.value} (${cached.type})`
                     );
                     return cached;
                 }
 
                 // Validate argument count
-                const expectedParams = functionSymbol.metadata?.comptimeParameters as AST.FieldNode[] | undefined;
+                const expectedParams = targetSymbol.metadata?.comptimeParameters as AST.FieldNode[] | undefined;
                 const expectedCount = expectedParams?.length || 0;
 
                 // Allow fewer arguments if defaults are provided
                 if (call.args.length > expectedCount) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
-                        `Comptime function '${functionSymbol.name}' expects at most ${expectedCount} argument(s), but got ${call.args.length}`,
+                        `Comptime function '${targetSymbol.name}' expects at most ${expectedCount} argument(s), but got ${call.args.length}`,
                         call.span
                     );
                     return null;
                 }
 
-                const body = functionSymbol.metadata?.comptimeFunctionBody as AST.StmtNode | undefined;
+                const body = targetSymbol.metadata?.comptimeFunctionBody as AST.StmtNode | undefined;
 
                 if (!body) {
                     this.reportError(
                         DiagCode.INTERNAL_ERROR,
-                        `Comptime function '${functionSymbol.name}' has no body stored`,
+                        `Comptime function '${targetSymbol.name}' has no body stored`,
                         call.base.span
                     );
                     return null;
@@ -874,9 +916,9 @@
 
                 // Get the FUNCTION'S scope (where parameters live), not the parent scope
                 // functionSymbol.scope is the MODULE scope, we need the child FUNCTION scope
-                const parentScope = this.config.services.scopeManager.getScope(functionSymbol.scope);
+                const parentScope = this.config.services.scopeManager.getScope(targetSymbol.scope);
                 const functionScope = this.config.services.scopeManager.findChildScopeByNameFromId(
-                    functionSymbol.name,
+                    targetSymbol.name,
                     parentScope.id,
                     ScopeKind.Function
                 );
@@ -884,14 +926,14 @@
                 if (!functionScope) {
                     this.reportError(
                         DiagCode.INTERNAL_ERROR,
-                        `Cannot find function scope for comptime function '${functionSymbol.name}'`,
+                        `Cannot find function scope for comptime function '${targetSymbol.name}'`,
                         call.base.span
                     );
                     return null;
                 }
 
                 this.log('verbose',
-                    `[Comptime] Evaluating function '${functionSymbol.name}' with ${call.args.length} argument(s) in scope ${functionScope.id}`
+                    `[Comptime] Evaluating function '${targetSymbol.name}' with ${call.args.length} argument(s) in scope ${functionScope.id}`
                 );
 
                 // Evaluate call arguments FIRST (in caller's context)
@@ -924,7 +966,7 @@
                         if (!param.initializer) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Comptime function '${functionSymbol.name}' requires ${expectedParams.length} argument(s), but got ${call.args.length}`,
+                                `Comptime function '${targetSymbol.name}' requires ${expectedParams.length} argument(s), but got ${call.args.length}`,
                                 call.span
                             );
                             return null;
@@ -960,7 +1002,7 @@
                 if (returnValue === null) {
                     this.reportError(
                         DiagCode.ANALYSIS_ERROR,
-                        `Could not evaluate comptime function '${functionSymbol.name}' at compile time. Ensure it has a simple 'return <constant>' statement.`,
+                        `Could not evaluate comptime function '${targetSymbol.name}' at compile time. Ensure it has a simple 'return <constant>' statement.`,
                         call.base.span
                     );
                     return null;
@@ -970,7 +1012,7 @@
                 this.comptimeResultCache.set(cacheKey, returnValue);
 
                 this.log('verbose',
-                    `[Comptime] Function '${functionSymbol.name}' returned ${returnValue.value} (${returnValue.type})`
+                    `[Comptime] Function '${targetSymbol.name}' returned ${returnValue.value} (${returnValue.type})`
                 );
 
                 return returnValue;

@@ -17,10 +17,10 @@
     import { SemanticValidator }                    from './phases/SemanticValidator';
 
     // Re-export
-    export { type Diagnostic, DiagCode, DiagKind, DiagnosticFix, DiagnosticManager }
-                                                from './components/DiagnosticManager';
-    export { DebugManager }                     from './components/DebugManager';
-    export { ContextTracker, AnalysisPhase }    from './components/ContextTracker';
+    export * from './components/DiagnosticManager';
+    export * from './components/ScopeManager';
+    export * from './components/DebugManager';
+    export * from './components/ContextTracker';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 

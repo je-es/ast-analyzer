@@ -33,7 +33,7 @@ declare enum ScopeKind {
     Expression = "Expression",
     Type = "Type"
 }
-declare enum SymbolKind$1 {
+declare enum SymbolKind {
     Use = "Use",
     Definition = "Definition",
     Variable = "Variable",
@@ -56,7 +56,7 @@ interface Scope {
 interface Symbol {
     id: SymbolId;
     name: string;
-    kind: SymbolKind$1;
+    kind: SymbolKind;
     type: AST.TypeNode | null;
     scope: ScopeId;
     contextSpan: AST.Span;
@@ -79,6 +79,7 @@ interface Symbol {
         callable?: boolean;
         params?: Symbol[];
         returnType?: AST.TypeNode;
+        errorType?: AST.TypeNode;
         isAsync?: boolean;
         isStatic?: boolean;
         isAbstract?: boolean;
@@ -93,6 +94,9 @@ interface Symbol {
     sourceSymbol?: SymbolId;
     isExported: boolean;
     exportAlias?: string;
+}
+interface BuiltinSymbolOption {
+    type: AST.TypeNode | null;
 }
 declare class ScopeManager {
     private readonly diagnosticManager;
@@ -137,7 +141,7 @@ declare class ScopeManager {
     addSymbolToScope(symbol: Symbol, scopeId: ScopeId): void;
     enterScope(kind: ScopeKind, name: string): ScopeId;
     exitScope(): ScopeId | null;
-    defineSymbol(name: string, kind: SymbolKind$1, opts: {
+    defineSymbol(name: string, kind: SymbolKind, opts: {
         type?: AST.TypeNode;
         visibility?: AST.VisibilityInfo;
         mutability?: AST.MutabilityInfo;
@@ -240,7 +244,7 @@ declare enum ExpressionContext {
 interface DeclarationContext {
     symbolName: string;
     symbolId: SymbolId;
-    symbolKind: SymbolKind;
+    symbolKind: ContextSymbolKind;
     phase: DeclarationPhase;
     span: AST.Span;
     parentScope: ScopeId;
@@ -270,7 +274,7 @@ declare enum AnalysisPhase {
     SemanticValidation = "SemanticValidation",
     FinalValidation = "FinalValidation"
 }
-type SymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
+type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
 interface SavedContextState {
     scopeId: ScopeId;
     moduleName: string;
@@ -306,7 +310,7 @@ declare class ContextTracker {
     pushContextSpan(span: AST.Span): void;
     popContextSpan(): AST.Span | undefined;
     clearContextSpans(): void;
-    startDeclaration(symbolName: string, symbolId: SymbolId, symbolKind: SymbolKind | 'Use', span: AST.Span, parentScope: ScopeId): void;
+    startDeclaration(symbolName: string, symbolId: SymbolId, symbolKind: ContextSymbolKind | 'Use', span: AST.Span, parentScope: ScopeId): void;
     startInitialization(symbolId: SymbolId): void;
     completeDeclaration(symbolId: SymbolId): void;
     isInDeclaration(symbolName: string): boolean;
@@ -344,7 +348,7 @@ declare class ContextTracker {
     getCurrentDeclarationContext(): DeclarationContext | undefined;
     getCurrentDeclarationSymbolId(): SymbolId | undefined;
     getCurrentDeclarationSymbolName(): string | undefined;
-    getCurrentDeclarationSymbolKind(): SymbolKind | undefined;
+    getCurrentDeclarationSymbolKind(): ContextSymbolKind | undefined;
     getCurrentDeclarationPhase(): DeclarationPhase | undefined;
     getCurrentDeclarationSpan(): AST.Span | undefined;
     getCurrentDeclarationParentScope(): ScopeId | undefined;
@@ -708,6 +712,7 @@ declare class SymbolResolver extends PhaseBase {
     private resolveSwitch;
     private findCallTargetSymbol;
     private validateCallableSymbol;
+    private resolveIdentifierType;
     private resolveIdentifier;
     private resolveBuiltinFunction;
     private resolveStandardIdentifier;
@@ -785,33 +790,23 @@ declare class TypeValidator extends PhaseBase {
     private inferIdentifierType;
     private validateMethodCallContext;
     private inferObjectType;
+    private doesObjectMatchStruct;
     private inferTupleType;
+    private getExpressionMutability;
     private inferBinaryType;
     private validateAssignment;
     private inferPrefixType;
-    /**
-     * Checks if an expression is an lvalue (has a memory location that can be referenced).
-     *
-     * Lvalues include:
-     * - Variables: x, y, myVar
-     * - Dereferences: ptr.*, arr[0]
-     * - Member access: obj.field, self.x
-     *
-     * Non-lvalues (cannot take address):
-     * - Literals: 42, "hello", true
-     * - Function calls: foo()
-     * - Arithmetic: x + y
-     * - Temporary values
-     */
     private isLValueExpression;
     private inferPostfixType;
     private inferCallType;
+    private validateEnumVariantConstruction;
     private validateMemberVisibility;
     private validateBuiltinCall;
     private validateStructMethodCall;
     private validateCallArgumentsWithContext;
     private inferExpressionTypeWithContext;
     private inferArrayAccessType;
+    private inferTupleIndexAccess;
     private inferMemberAccessType;
     private resolveWildcardMemberAccess;
     private isStaticMemberAccess;
@@ -862,12 +857,6 @@ declare class TypeValidator extends PhaseBase {
     private extractMemberName;
     private extractEnumVariantName;
     private extractTypeName;
-    /**
-     * Normalizes a type by unwrapping all parentheses while preserving
-     * the original type for span-based error reporting.
-     *
-     * This ensures type comparisons work correctly regardless of parenthesization.
-     */
     private normalizeType;
     private findModuleScope;
     private findCallTargetSymbol;
@@ -1000,4 +989,4 @@ declare class Analyzer {
     private getMemoryUsage;
 }
 
-export { type AnalysisConfig, AnalysisPhase, type AnalysisResult, type AnalysisServices, Analyzer, ContextTracker, DebugManager, DiagCode, DiagKind, type Diagnostic, type DiagnosticFix, DiagnosticManager, type PhaseResult };
+export { type AnalysisConfig, type AnalysisContext, AnalysisPhase, type AnalysisResult, type AnalysisServices, Analyzer, type BuiltinSymbolOption, type ContextSymbolKind, ContextTracker, type DebugKind, DebugManager, type DeclarationContext, DeclarationPhase, DiagCode, DiagKind, type Diagnostic, type DiagnosticFix, DiagnosticManager, ExpressionContext, type ExpressionContextInfo, type PhaseResult, type SavedContextState, type Scope, type ScopeId, ScopeKind, ScopeManager, type Symbol, type SymbolId, SymbolKind };

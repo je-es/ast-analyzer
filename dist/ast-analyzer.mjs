@@ -357,6 +357,28 @@ var DiagnosticManager = class {
 };
 
 // lib/components/ContextTracker.ts
+var DeclarationPhase = /* @__PURE__ */ ((DeclarationPhase2) => {
+  DeclarationPhase2["PreDeclaration"] = "PreDeclaration";
+  DeclarationPhase2["InDeclaration"] = "InDeclaration";
+  DeclarationPhase2["InInitialization"] = "InInitialization";
+  DeclarationPhase2["PostDeclaration"] = "PostDeclaration";
+  return DeclarationPhase2;
+})(DeclarationPhase || {});
+var ExpressionContext = /* @__PURE__ */ ((ExpressionContext2) => {
+  ExpressionContext2["VariableInitializer"] = "VariableInitializer";
+  ExpressionContext2["ParameterInitializer"] = "ParameterInitializer";
+  ExpressionContext2["FunctionBody"] = "FunctionBody";
+  ExpressionContext2["AssignmentTarget"] = "AssignmentTarget";
+  ExpressionContext2["AssignmentSource"] = "AssignmentSource";
+  ExpressionContext2["ConditionExpression"] = "ConditionExpression";
+  ExpressionContext2["ReturnExpression"] = "ReturnExpression";
+  ExpressionContext2["DeferExpression"] = "DeferExpression";
+  ExpressionContext2["ThrowExpression"] = "ThrowExpression";
+  ExpressionContext2["CallArgument"] = "CallArgument";
+  ExpressionContext2["FunctionCall"] = "FunctionCall";
+  ExpressionContext2["GeneralExpression"] = "GeneralExpression";
+  return ExpressionContext2;
+})(ExpressionContext || {});
 var AnalysisPhase = /* @__PURE__ */ ((AnalysisPhase2) => {
   AnalysisPhase2["Collection"] = "Collection";
   AnalysisPhase2["Resolution"] = "Resolution";
@@ -845,7 +867,6 @@ var DebugManager = class {
           }
         }
       }
-      console.log(`${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`);
     }
   }
   increaseIndent() {
@@ -902,6 +923,27 @@ var IdGenerator = class {
 };
 
 // lib/components/ScopeManager.ts
+var ScopeKind = /* @__PURE__ */ ((ScopeKind2) => {
+  ScopeKind2["Global"] = "Global";
+  ScopeKind2["Module"] = "Module";
+  ScopeKind2["Function"] = "Function";
+  ScopeKind2["Loop"] = "Loop";
+  ScopeKind2["Block"] = "Block";
+  ScopeKind2["Expression"] = "Expression";
+  ScopeKind2["Type"] = "Type";
+  return ScopeKind2;
+})(ScopeKind || {});
+var SymbolKind = /* @__PURE__ */ ((SymbolKind2) => {
+  SymbolKind2["Use"] = "Use";
+  SymbolKind2["Definition"] = "Definition";
+  SymbolKind2["Variable"] = "Variable";
+  SymbolKind2["Function"] = "Function";
+  SymbolKind2["Parameter"] = "Parameter";
+  SymbolKind2["StructField"] = "StructField";
+  SymbolKind2["EnumVariant"] = "EnumVariant";
+  SymbolKind2["Error"] = "Error";
+  return SymbolKind2;
+})(SymbolKind || {});
 var ScopeManager = class {
   constructor(diagnosticManager, debugManager) {
     this.diagnosticManager = diagnosticManager;
@@ -2591,7 +2633,7 @@ var SymbolCollector = class extends PhaseBase {
     let needsScope = false;
     switch (expr.kind) {
       case "If":
-      case "Switch":
+      case "Match":
       case "Try":
       case "Catch":
         needsScope = true;
@@ -2633,8 +2675,8 @@ var SymbolCollector = class extends PhaseBase {
       case "If":
         this.handleIfExpr(expr.getIf(), scope, moduleName);
         break;
-      case "Switch":
-        this.handleSwitchExpr(expr.getSwitch(), scope, moduleName);
+      case "Match":
+        this.handleSwitchExpr(expr.getMatch(), scope, moduleName);
         break;
       case "Binary":
         this.handleBinaryExpr(expr.getBinary(), scope, moduleName);
@@ -2927,6 +2969,7 @@ var SymbolCollector = class extends PhaseBase {
         );
         continue;
       }
+      this.collectEnumVariantIdent(variant.ident, typeScope, moduleName);
       if (variant.type) {
         const variantScope = this.createTypeScope(variant.ident.name, typeScope);
         if (variant.type.isStruct()) {
@@ -2943,8 +2986,6 @@ var SymbolCollector = class extends PhaseBase {
         } else {
           this.collectType(variant.type, typeScope, moduleName);
         }
-      } else {
-        this.collectEnumVariantIdent(variant.ident, typeScope, moduleName);
       }
     }
   }
@@ -2978,7 +3019,21 @@ var SymbolCollector = class extends PhaseBase {
   }
   handleUnionType(unionType, parentScope, moduleName) {
     for (const variant of unionType.types) {
-      this.collectType(variant, parentScope, moduleName);
+      if (variant.isStruct()) {
+        const anonId = this.config.services.scopeManager.symbolIdGenerator.next();
+        const scopeName = `<union-struct-${anonId}>`;
+        const structScope = this.createTypeScope(scopeName, parentScope, "Struct");
+        const struct = variant.getStruct();
+        struct.metadata = __spreadProps(__spreadValues({}, struct.metadata), { scopeId: structScope.id });
+        this.config.services.scopeManager.withScope(structScope.id, () => {
+          this.config.services.contextTracker.withSavedState(() => {
+            this.config.services.contextTracker.setScope(structScope.id);
+            this.handleStructType(struct, structScope, moduleName);
+          });
+        });
+      } else {
+        this.collectType(variant, parentScope, moduleName);
+      }
     }
   }
   collectStructField(fieldNode, scope, moduleName) {
@@ -4352,8 +4407,8 @@ var SymbolResolver = class extends PhaseBase {
         case "If":
           this.resolveIf(expr.getIf(), contextSpan, parameterContext);
           break;
-        case "Switch":
-          this.resolveSwitch(expr.getSwitch(), contextSpan, parameterContext);
+        case "Match":
+          this.resolveSwitch(expr.getMatch(), contextSpan, parameterContext);
           break;
         default:
           this.log("verbose", `Unhandled expression type: ${expr.kind}`);
@@ -4701,12 +4756,12 @@ var SymbolResolver = class extends PhaseBase {
       this.resolveStmt(ifNode.elseStmt, currentScope);
     }
   }
-  resolveSwitch(switchNode, contextSpan, parameterContext) {
-    this.config.services.contextTracker.enterExpression("ConditionExpression" /* ConditionExpression */, switchNode.condExpr.span);
-    this.resolveExprStmt(switchNode.condExpr, contextSpan, parameterContext);
+  resolveSwitch(MatchNode, contextSpan, parameterContext) {
+    this.config.services.contextTracker.enterExpression("ConditionExpression" /* ConditionExpression */, MatchNode.condExpr.span);
+    this.resolveExprStmt(MatchNode.condExpr, contextSpan, parameterContext);
     this.config.services.contextTracker.exitExpression();
     const currentScope = this.config.services.scopeManager.getCurrentScope();
-    for (const switchCase of switchNode.cases) {
+    for (const switchCase of MatchNode.cases) {
       if (switchCase.expr) {
         this.resolveExprStmt(switchCase.expr, contextSpan, parameterContext);
       }
@@ -4714,8 +4769,8 @@ var SymbolResolver = class extends PhaseBase {
         this.resolveStmt(switchCase.stmt, currentScope);
       }
     }
-    if (switchNode.defCase) {
-      this.resolveStmt(switchNode.defCase.stmt, currentScope);
+    if (MatchNode.defCase) {
+      this.resolveStmt(MatchNode.defCase.stmt, currentScope);
     }
   }
   findCallTargetSymbol(baseExpr) {
@@ -4731,12 +4786,15 @@ var SymbolResolver = class extends PhaseBase {
     return null;
   }
   validateCallableSymbol(symbol, span) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d;
     if (symbol.kind === "Function" /* Function */ || ((_a = symbol.metadata) == null ? void 0 : _a.callable) === true) {
       return;
     }
-    if (((_b = symbol.type) == null ? void 0 : _b.kind) === "function") {
-      return;
+    if (symbol.type) {
+      const resolvedType = this.resolveIdentifierType(symbol.type);
+      if (resolvedType.kind === "function") {
+        return;
+      }
     }
     if (symbol.kind === "Use" /* Use */ && symbol.importSource) {
       const sourceModuleScope = this.config.services.scopeManager.findScopeByName(symbol.importSource, "Module" /* Module */);
@@ -4744,14 +4802,14 @@ var SymbolResolver = class extends PhaseBase {
         let sourceSymbol = sourceModuleScope.symbols.get(symbol.name);
         if (!sourceSymbol) {
           for (const [_, potentialSource] of sourceModuleScope.symbols) {
-            if (potentialSource.kind === "Function" /* Function */ || ((_c = potentialSource.metadata) == null ? void 0 : _c.callable) === true) {
+            if (potentialSource.kind === "Function" /* Function */ || ((_b = potentialSource.metadata) == null ? void 0 : _b.callable) === true) {
               sourceSymbol = potentialSource;
               break;
             }
           }
         }
         if (sourceSymbol) {
-          if (sourceSymbol.kind === "Function" /* Function */ || ((_d = sourceSymbol.metadata) == null ? void 0 : _d.callable) === true || ((_e = sourceSymbol.type) == null ? void 0 : _e.kind) === "function") {
+          if (sourceSymbol.kind === "Function" /* Function */ || ((_c = sourceSymbol.metadata) == null ? void 0 : _c.callable) === true || ((_d = sourceSymbol.type) == null ? void 0 : _d.kind) === "function") {
             return;
           }
         }
@@ -4762,6 +4820,17 @@ var SymbolResolver = class extends PhaseBase {
       `Cannot call value of non-function type. '${symbol.name}' is a ${symbol.kind.toLowerCase()}`,
       span
     );
+  }
+  // Add this helper method if it doesn't exist:
+  resolveIdentifierType(type) {
+    if (!type.isIdent()) return type;
+    const ident = type.getIdent();
+    if (ident.builtin) return type;
+    const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+    if (symbol && symbol.type) {
+      return this.resolveIdentifierType(symbol.type);
+    }
+    return type;
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── [5] Ident Level ──────────────────────────┐
@@ -6005,7 +6074,7 @@ var ExpressionEvaluator = class {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────── COMPTIME FUNCTION CALLS ────────────────────┐
   evaluateComptimeFunctionCall(call, ctx) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const functionSymbol = this.findCallTargetSymbol(call.base);
     if (!functionSymbol) {
       this.reportError(
@@ -6015,60 +6084,92 @@ var ExpressionEvaluator = class {
       );
       return null;
     }
-    const isComptimeFunc = ((_a = functionSymbol.metadata) == null ? void 0 : _a.isComptimeFunction) === true;
+    let targetSymbol = functionSymbol;
+    if (functionSymbol.kind === "Variable" /* Variable */) {
+      if ((_a = functionSymbol.metadata) == null ? void 0 : _a.initializer) {
+        const initExpr = functionSymbol.metadata.initializer;
+        if (initExpr.is("Primary")) {
+          const primary = initExpr.getPrimary();
+          if (primary == null ? void 0 : primary.is("Ident")) {
+            const targetIdent = primary.getIdent();
+            const resolvedSymbol = this.config.services.scopeManager.lookupSymbol(targetIdent.name);
+            if (resolvedSymbol) {
+              if (resolvedSymbol.kind === "Function" /* Function */ && ((_b = resolvedSymbol.metadata) == null ? void 0 : _b.isComptimeFunction) === true) {
+                targetSymbol = resolvedSymbol;
+                this.log(
+                  "verbose",
+                  `[Comptime] Resolved function pointer '${functionSymbol.name}' to comptime function '${resolvedSymbol.name}'`
+                );
+              } else {
+                return null;
+              }
+            } else {
+              return null;
+            }
+          } else {
+            return null;
+          }
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    }
+    const isComptimeFunc = ((_c = targetSymbol.metadata) == null ? void 0 : _c.isComptimeFunction) === true;
     if (!isComptimeFunc) {
       this.reportError(
         "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-        `Cannot call non-comptime function '${functionSymbol.name}' in compile-time context. Mark it with 'comptime' keyword.`,
+        `Cannot call non-comptime function '${targetSymbol.name}' in compile-time context. Mark it with 'comptime' keyword.`,
         call.base.span
       );
       return null;
     }
-    const cacheKey = this.createComptimeCacheKey(functionSymbol, call.args, ctx);
+    const cacheKey = this.createComptimeCacheKey(targetSymbol, call.args, ctx);
     const cached = this.comptimeResultCache.get(cacheKey);
     if (cached) {
       this.log(
         "verbose",
-        `[Comptime] Using cached result for '${functionSymbol.name}': ${cached.value} (${cached.type})`
+        `[Comptime] Using cached result for '${targetSymbol.name}': ${cached.value} (${cached.type})`
       );
       return cached;
     }
-    const expectedParams = (_b = functionSymbol.metadata) == null ? void 0 : _b.comptimeParameters;
+    const expectedParams = (_d = targetSymbol.metadata) == null ? void 0 : _d.comptimeParameters;
     const expectedCount = (expectedParams == null ? void 0 : expectedParams.length) || 0;
     if (call.args.length > expectedCount) {
       this.reportError(
         "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-        `Comptime function '${functionSymbol.name}' expects at most ${expectedCount} argument(s), but got ${call.args.length}`,
+        `Comptime function '${targetSymbol.name}' expects at most ${expectedCount} argument(s), but got ${call.args.length}`,
         call.span
       );
       return null;
     }
-    const body = (_c = functionSymbol.metadata) == null ? void 0 : _c.comptimeFunctionBody;
+    const body = (_e = targetSymbol.metadata) == null ? void 0 : _e.comptimeFunctionBody;
     if (!body) {
       this.reportError(
         "INTERNAL_ERROR" /* INTERNAL_ERROR */,
-        `Comptime function '${functionSymbol.name}' has no body stored`,
+        `Comptime function '${targetSymbol.name}' has no body stored`,
         call.base.span
       );
       return null;
     }
-    const parentScope = this.config.services.scopeManager.getScope(functionSymbol.scope);
+    const parentScope = this.config.services.scopeManager.getScope(targetSymbol.scope);
     const functionScope = this.config.services.scopeManager.findChildScopeByNameFromId(
-      functionSymbol.name,
+      targetSymbol.name,
       parentScope.id,
       "Function" /* Function */
     );
     if (!functionScope) {
       this.reportError(
         "INTERNAL_ERROR" /* INTERNAL_ERROR */,
-        `Cannot find function scope for comptime function '${functionSymbol.name}'`,
+        `Cannot find function scope for comptime function '${targetSymbol.name}'`,
         call.base.span
       );
       return null;
     }
     this.log(
       "verbose",
-      `[Comptime] Evaluating function '${functionSymbol.name}' with ${call.args.length} argument(s) in scope ${functionScope.id}`
+      `[Comptime] Evaluating function '${targetSymbol.name}' with ${call.args.length} argument(s) in scope ${functionScope.id}`
     );
     const evaluatedArgs = [];
     for (let i = 0; i < call.args.length; i++) {
@@ -6093,7 +6194,7 @@ var ExpressionEvaluator = class {
         if (!param.initializer) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-            `Comptime function '${functionSymbol.name}' requires ${expectedParams.length} argument(s), but got ${call.args.length}`,
+            `Comptime function '${targetSymbol.name}' requires ${expectedParams.length} argument(s), but got ${call.args.length}`,
             call.span
           );
           return null;
@@ -6123,7 +6224,7 @@ var ExpressionEvaluator = class {
     if (returnValue === null) {
       this.reportError(
         "ANALYSIS_ERROR" /* ANALYSIS_ERROR */,
-        `Could not evaluate comptime function '${functionSymbol.name}' at compile time. Ensure it has a simple 'return <constant>' statement.`,
+        `Could not evaluate comptime function '${targetSymbol.name}' at compile time. Ensure it has a simple 'return <constant>' statement.`,
         call.base.span
       );
       return null;
@@ -6131,7 +6232,7 @@ var ExpressionEvaluator = class {
     this.comptimeResultCache.set(cacheKey, returnValue);
     this.log(
       "verbose",
-      `[Comptime] Function '${functionSymbol.name}' returned ${returnValue.value} (${returnValue.type})`
+      `[Comptime] Function '${targetSymbol.name}' returned ${returnValue.value} (${returnValue.type})`
     );
     return returnValue;
   }
@@ -7000,6 +7101,29 @@ var TypeValidator = class extends PhaseBase {
           }
         }
       }
+      if (letNode.field.initializer.is("Postfix")) {
+        const postfix = letNode.field.initializer.getPostfix();
+        if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+          const access = postfix.getMemberAccess();
+          const baseType = this.inferExpressionType(access.base);
+          if (baseType) {
+            const resolvedBase = this.resolveIdentifierType(baseType);
+            if (resolvedBase.isEnum()) {
+              const memberName = this.extractMemberName(access.target);
+              const enumDef = resolvedBase.getEnum();
+              const variant = enumDef.variants.find((v) => v.ident.name === memberName);
+              if (variant && variant.type) {
+                this.reportError(
+                  "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+                  `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                  letNode.field.initializer.span
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
     } else if (!letNode.field.type) {
       this.reportError(
         "CANNOT_INFER_TYPE" /* CANNOT_INFER_TYPE */,
@@ -7187,6 +7311,29 @@ var TypeValidator = class extends PhaseBase {
               `Cannot assign type '${this.getTypeDisplayName(initType)}' to parameter of type '${this.getTypeDisplayName(paramNode.type)}'`,
               paramNode.initializer.span
             );
+          }
+        }
+      }
+      if (paramNode.initializer.is("Postfix")) {
+        const postfix = paramNode.initializer.getPostfix();
+        if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+          const access = postfix.getMemberAccess();
+          const baseType = this.inferExpressionType(access.base);
+          if (baseType) {
+            const resolvedBase = this.resolveIdentifierType(baseType);
+            if (resolvedBase.isEnum()) {
+              const memberName = this.extractMemberName(access.target);
+              const enumDef = resolvedBase.getEnum();
+              const variant = enumDef.variants.find((v) => v.ident.name === memberName);
+              if (variant && variant.type) {
+                this.reportError(
+                  "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+                  `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                  paramNode.initializer.span
+                );
+                return;
+              }
+            }
           }
         }
       }
@@ -7766,6 +7913,9 @@ var TypeValidator = class extends PhaseBase {
         return null;
       }
       const funcType = funcSymbol.type.getFunction();
+      if (funcSymbol.metadata) {
+        funcSymbol.metadata.errorType = funcType.errorType;
+      }
       return funcType.errorType || null;
     }
   }
@@ -7849,8 +7999,8 @@ var TypeValidator = class extends PhaseBase {
           return this.inferCatchType(expr.getCatch());
         case "If":
           return this.inferIfType(expr.getIf());
-        case "Switch":
-          return this.inferSwitchType(expr.getSwitch());
+        case "Match":
+          return this.inferSwitchType(expr.getMatch());
         default:
           return null;
       }
@@ -8069,7 +8219,7 @@ var TypeValidator = class extends PhaseBase {
     return AST4.TypeNode.asArray(literal.span, firstType, sizeExpr);
   }
   inferIdentifierType(ident) {
-    var _a, _b;
+    var _a, _b, _c;
     if (ident.name === "self") {
       const selfSymbol = this.config.services.scopeManager.lookupSymbol("self");
       if (selfSymbol && ((_a = selfSymbol.metadata) == null ? void 0 : _a.isSelf)) {
@@ -8100,6 +8250,9 @@ var TypeValidator = class extends PhaseBase {
     if (ident.name === "self" && ((_b = symbol.metadata) == null ? void 0 : _b.isSelf)) {
       symbol.used = true;
       return symbol.type;
+    }
+    if (symbol.kind === "Definition" /* Definition */ && ((_c = symbol.type) == null ? void 0 : _c.isType())) {
+      return AST4.TypeNode.asPrimitive(ident.span, "type");
     }
     if (symbol.type) return symbol.type;
     if (symbol.kind === "Function" /* Function */ && symbol.metadata) {
@@ -8133,8 +8286,9 @@ var TypeValidator = class extends PhaseBase {
       );
       return;
     }
-    if (!isStaticAccess && isStaticMethod) {
-      return;
+    if (isStaticAccess && isStaticMethod) {
+      if (this.currentIsStaticMethod) {
+      }
     }
   }
   inferObjectType(obj) {
@@ -8176,6 +8330,28 @@ var TypeValidator = class extends PhaseBase {
         return null;
       }
     }
+    const expectedType = this.getExpectedTypeFromContext();
+    if (expectedType) {
+      const resolvedExpected = this.resolveIdentifierType(expectedType);
+      if (resolvedExpected.isUnion()) {
+        const unionType = resolvedExpected.getUnion();
+        for (const memberType of unionType.types) {
+          const resolvedMember = this.resolveIdentifierType(memberType);
+          if (resolvedMember.isStruct()) {
+            const struct = resolvedMember.getStruct();
+            if (this.doesObjectMatchStruct(obj, struct)) {
+              return memberType;
+            }
+          }
+        }
+      }
+      if (resolvedExpected.isStruct()) {
+        const struct = resolvedExpected.getStruct();
+        if (this.doesObjectMatchStruct(obj, struct)) {
+          return expectedType;
+        }
+      }
+    }
     const fields = [];
     const fieldNodes = [];
     for (const prop of obj.props) {
@@ -8203,6 +8379,32 @@ var TypeValidator = class extends PhaseBase {
     const members = fieldNodes.map((f) => AST4.StructMemberNode.createField(f.span, f));
     return AST4.TypeNode.asStruct(obj.span, members, "Anonymous");
   }
+  // Helper method to check if object literal matches struct shape
+  doesObjectMatchStruct(obj, struct) {
+    const structFields = /* @__PURE__ */ new Map();
+    for (const member of struct.members) {
+      if (member.isField()) {
+        const field = member.source;
+        structFields.set(field.ident.name, field);
+      }
+    }
+    if (obj.props.length !== structFields.size) {
+      return false;
+    }
+    for (const prop of obj.props) {
+      const structField = structFields.get(prop.key.name);
+      if (!structField) {
+        return false;
+      }
+      if (prop.val && structField.type) {
+        const propType = this.inferExpressionType(prop.val);
+        if (propType && !this.isTypeCompatible(structField.type, propType)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
   inferTupleType(tuple) {
     const fieldTypes = [];
     for (const field of tuple.fields) {
@@ -8213,6 +8415,67 @@ var TypeValidator = class extends PhaseBase {
     return AST4.TypeNode.asTuple(tuple.span, fieldTypes);
   }
   // ===== BINARY OPERATIONS =====
+  getExpressionMutability(expr) {
+    var _a, _b, _c, _d;
+    if (expr.is("Primary")) {
+      const primary = expr.getPrimary();
+      if (primary == null ? void 0 : primary.is("Ident")) {
+        const ident = primary.getIdent();
+        if (ident) {
+          const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+          if (symbol) {
+            if ((_a = symbol.type) == null ? void 0 : _a.isArray()) {
+              return ((_c = (_b = symbol.type) == null ? void 0 : _b.getArray()) == null ? void 0 : _c.mutable) ? "Mutable" : "Immutable";
+            }
+          }
+        }
+      }
+      if (primary == null ? void 0 : primary.is("Literal")) {
+        const literal = primary.getLiteral();
+        if ((literal == null ? void 0 : literal.kind) === "String") {
+          return "Literal";
+        }
+      }
+    }
+    if (expr.is("Binary")) {
+      const binary = expr.getBinary();
+      if (binary.kind === "Additive" && binary.operator === "+") {
+        const leftMut = this.getExpressionMutability(binary.left);
+        const rightMut = this.getExpressionMutability(binary.right);
+        if (leftMut === "Literal") return rightMut;
+        if (rightMut === "Literal") return leftMut;
+        if (leftMut === "Mutable" !== (rightMut === "Mutable")) {
+          return "Unset";
+        }
+        return leftMut;
+      }
+    }
+    if (expr.is("Postfix")) {
+      const postfix = expr.getPostfix();
+      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+        const access = postfix.getMemberAccess();
+        const memberName = this.extractMemberName(access.target);
+        if (memberName) {
+          const baseType = this.inferExpressionType(access.base);
+          if (baseType) {
+            const resolvedBase = this.resolveIdentifierType(baseType);
+            if (resolvedBase.isStruct()) {
+              const struct = resolvedBase.getStruct();
+              const scopeId = (_d = struct.metadata) == null ? void 0 : _d.scopeId;
+              if (scopeId !== void 0) {
+                const structScope = this.config.services.scopeManager.getScope(scopeId);
+                const fieldSymbol = structScope.symbols.get(memberName);
+                if (fieldSymbol) {
+                  return fieldSymbol.mutability.kind;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return "Immutable";
+  }
   inferBinaryType(binary) {
     if (!binary.left || !binary.right) return null;
     if (binary.kind === "Assignment") {
@@ -8229,6 +8492,37 @@ var TypeValidator = class extends PhaseBase {
         binary.span
       );
       return null;
+    }
+    if (binary.kind === "Additive" && binary.operator === "+") {
+      const resolvedLeft = this.resolveIdentifierType(leftType);
+      const resolvedRight = this.resolveIdentifierType(rightType);
+      const leftIsString = this.isStringType(resolvedLeft);
+      const rightIsString = this.isStringType(resolvedRight);
+      if (leftIsString && rightIsString) {
+        const leftMutability = this.getExpressionMutability(binary.left);
+        const rightMutability = this.getExpressionMutability(binary.right);
+        const leftEffective = leftMutability === "Literal" ? null : leftMutability;
+        const rightEffective = rightMutability === "Literal" ? null : rightMutability;
+        if (leftEffective !== null && rightEffective !== null) {
+          if (leftEffective !== rightEffective) {
+            this.reportError(
+              "MUTABILITY_MISMATCH" /* MUTABILITY_MISMATCH */,
+              `Cannot concatenate arrays with different mutability`,
+              binary.span
+            );
+            return null;
+          }
+        }
+        return leftType;
+      }
+      if (leftIsString || rightIsString) {
+        this.reportError(
+          "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+          `Cannot concatenate string with non-string type`,
+          binary.span
+        );
+        return null;
+      }
     }
     switch (binary.kind) {
       case "Additive":
@@ -8412,20 +8706,6 @@ var TypeValidator = class extends PhaseBase {
         return null;
     }
   }
-  /**
-   * Checks if an expression is an lvalue (has a memory location that can be referenced).
-   *
-   * Lvalues include:
-   * - Variables: x, y, myVar
-   * - Dereferences: ptr.*, arr[0]
-   * - Member access: obj.field, self.x
-   *
-   * Non-lvalues (cannot take address):
-   * - Literals: 42, "hello", true
-   * - Function calls: foo()
-   * - Arithmetic: x + y
-   * - Temporary values
-   */
   isLValueExpression(expr) {
     switch (expr.kind) {
       case "Primary": {
@@ -8480,7 +8760,7 @@ var TypeValidator = class extends PhaseBase {
       case "Try":
       case "Catch":
       case "If":
-      case "Switch":
+      case "Match":
       case "Typeof":
       case "Sizeof":
         return false;
@@ -8546,6 +8826,9 @@ var TypeValidator = class extends PhaseBase {
         const baseType = this.inferExpressionType(access.base);
         if (baseType) {
           const resolvedBase = this.resolveIdentifierType(baseType);
+          if (resolvedBase.isEnum()) {
+            return this.validateEnumVariantConstruction(call, access, resolvedBase);
+          }
           if (resolvedBase.isStruct()) {
             const memberName = this.extractMemberName(access.target);
             if (memberName) {
@@ -8571,15 +8854,68 @@ var TypeValidator = class extends PhaseBase {
     if (!calleeType) {
       return null;
     }
-    if (calleeType.isFunction()) {
-      return this.validateCallArgumentsWithContext(call, calleeType);
+    const resolvedCalleeType = this.resolveIdentifierType(calleeType);
+    if (resolvedCalleeType.isFunction()) {
+      return this.validateCallArgumentsWithContext(call, resolvedCalleeType);
     }
     this.reportError(
       "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-      `Cannot call value of non-function type`,
+      `Cannot call value of non-function type '${this.getTypeDisplayName(calleeType)}'`,
       call.base.span
     );
     return null;
+  }
+  validateEnumVariantConstruction(call, access, enumType) {
+    var _a;
+    const variantName = this.extractMemberName(access.target);
+    if (!variantName) return null;
+    const enumDef = enumType.getEnum();
+    const scopeId = (_a = enumDef.metadata) == null ? void 0 : _a.scopeId;
+    if (scopeId === void 0) {
+      this.reportError(
+        "INTERNAL_ERROR" /* INTERNAL_ERROR */,
+        `Cannot find scope for enum`,
+        call.span
+      );
+      return null;
+    }
+    const enumScope = this.config.services.scopeManager.getScope(scopeId);
+    const variantSymbol = enumScope.symbols.get(variantName);
+    if (!variantSymbol || variantSymbol.kind !== "EnumVariant" /* EnumVariant */) {
+      this.reportError(
+        "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
+        `Variant '${variantName}' not found in enum`,
+        access.target.span
+      );
+      return null;
+    }
+    const variant = enumDef.variants.find((v) => v.ident.name === variantName);
+    if (!variant) return null;
+    if (!variant.type) {
+      this.reportError(
+        "TOO_MANY_ARGUMENTS" /* TOO_MANY_ARGUMENTS */,
+        `Variant '${variantName}' does not take any arguments`,
+        call.span
+      );
+      return null;
+    }
+    if (call.args.length !== 1) {
+      this.reportError(
+        "TOO_MANY_ARGUMENTS" /* TOO_MANY_ARGUMENTS */,
+        `Variant '${variantName}' expects exactly 1 argument`,
+        call.span
+      );
+      return null;
+    }
+    const argType = this.inferExpressionType(call.args[0]);
+    if (argType && !this.isTypeCompatible(variant.type, argType)) {
+      this.reportError(
+        "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+        `Argument type '${this.getTypeDisplayName(argType)}' is not compatible with variant type '${this.getTypeDisplayName(variant.type)}'`,
+        call.args[0].span
+      );
+    }
+    return enumType;
   }
   validateMemberVisibility(memberSymbol, structScope, accessSpan) {
     if (memberSymbol.visibility.kind === "Public") {
@@ -8753,6 +9089,10 @@ var TypeValidator = class extends PhaseBase {
     const baseType = this.inferExpressionType(access.base);
     const indexType = this.inferExpressionType(access.index);
     if (!baseType) return null;
+    const resolvedType = this.resolveIdentifierType(baseType);
+    if (access.index.kind === "Range") {
+      return resolvedType;
+    }
     if (indexType && !this.isIntegerType(indexType)) {
       this.reportError(
         "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -8760,11 +9100,11 @@ var TypeValidator = class extends PhaseBase {
         access.index.span
       );
     }
-    if (baseType.isArray()) {
-      return baseType.getArray().target;
+    if (resolvedType.isTuple()) {
+      return this.inferTupleIndexAccess(resolvedType, access.index, access.span);
     }
-    if (this.isStringType(baseType)) {
-      return AST4.TypeNode.asUnsigned(access.span, "u8", 8);
+    if (resolvedType.isArray() || this.isStringType(resolvedType)) {
+      return resolvedType.getArray().target;
     }
     this.reportError(
       "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -8772,6 +9112,28 @@ var TypeValidator = class extends PhaseBase {
       access.base.span
     );
     return null;
+  }
+  inferTupleIndexAccess(tupleType, indexExpr, span) {
+    const tuple = tupleType.getTuple();
+    const indexValue = this.ExpressionEvaluator.evaluateComptimeExpression(indexExpr);
+    if (indexValue === null) {
+      this.reportError(
+        "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+        `Tuple index must be a compile-time constant`,
+        indexExpr.span
+      );
+      return null;
+    }
+    const index = Number(indexValue);
+    if (index < 0 || index >= tuple.fields.length) {
+      this.reportError(
+        "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+        `Tuple index ${index} out of bounds (tuple has ${tuple.fields.length} field${tuple.fields.length !== 1 ? "s" : ""})`,
+        indexExpr.span
+      );
+      return null;
+    }
+    return tuple.fields[index];
   }
   inferMemberAccessType(access) {
     var _a, _b, _c;
@@ -8825,6 +9187,31 @@ var TypeValidator = class extends PhaseBase {
     if (!baseType) {
       return null;
     }
+    baseType = this.resolveIdentifierType(baseType);
+    if (baseType.isArray() || this.isStringType(baseType)) {
+      const memberName = this.extractMemberName(access.target);
+      if (memberName === "len") {
+        return AST4.TypeNode.asUnsigned(access.span, "usize", 64);
+      }
+      this.reportError(
+        "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
+        `Type '${this.getTypeDisplayName(baseType)}' has no property '${memberName}'. Available: len`,
+        access.target.span
+      );
+      return null;
+    }
+    if (baseType.isTuple()) {
+      const memberName = this.extractMemberName(access.target);
+      if (memberName === "len") {
+        return AST4.TypeNode.asUnsigned(access.span, "usize", 64);
+      }
+      this.reportError(
+        "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
+        `Type '${this.getTypeDisplayName(baseType)}' has no property '${memberName}'. Available: len`,
+        access.target.span
+      );
+      return null;
+    }
     if (access.optional && !baseType.isOptional()) {
       this.reportError(
         "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -8858,6 +9245,17 @@ var TypeValidator = class extends PhaseBase {
       if (typeSymbol == null ? void 0 : typeSymbol.type) {
         unwrappedType = typeSymbol.type;
       }
+    }
+    if (unwrappedType.isEnum()) {
+      const memberType2 = this.resolveEnumMember(unwrappedType, access);
+      if (memberType2) {
+        const enumDef = unwrappedType.getEnum();
+        const memberName = this.extractMemberName(access.target);
+        const variant = enumDef.variants.find((v) => v.ident.name === memberName);
+        if (variant && variant.type) {
+        }
+      }
+      return memberType2;
     }
     const isStaticAccess = this.isStaticMemberAccess(access.base);
     const memberType = this.resolveMemberOnUnwrappedType(
@@ -9058,6 +9456,12 @@ var TypeValidator = class extends PhaseBase {
           return variant.type || enumType;
         }
       }
+      this.reportError(
+        "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
+        `Enum variant '${memberName}' not found`,
+        access.target.span
+      );
+      return null;
     }
     if (enumType.isErrset()) {
       const errorType = enumType.getErrset();
@@ -9066,10 +9470,16 @@ var TypeValidator = class extends PhaseBase {
           return AST4.TypeNode.asIdentifier(member.span, member.name);
         }
       }
+      this.reportError(
+        "ERROR_MEMBER_NOT_FOUND" /* ERROR_MEMBER_NOT_FOUND */,
+        `Error member '${memberName}' not found in error set`,
+        access.target.span
+      );
+      return null;
     }
     this.reportError(
       "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
-      `${enumType.isErrset() ? "Error set" : "enum"} has no variant '${memberName}'`,
+      `${enumType.isErrset() ? "Error set" : "Enum"} has no variant '${memberName}'`,
       access.target.span
     );
     return null;
@@ -9182,11 +9592,11 @@ var TypeValidator = class extends PhaseBase {
     }
     return null;
   }
-  inferSwitchType(switchNode) {
-    this.inferExpressionType(switchNode.condExpr);
-    this.validateSwitchExhaustiveness(switchNode);
+  inferSwitchType(MatchNode) {
+    this.inferExpressionType(MatchNode.condExpr);
+    this.validateSwitchExhaustiveness(MatchNode);
     const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "Expression" /* Expression */);
-    for (const switchCase of switchNode.cases) {
+    for (const switchCase of MatchNode.cases) {
       if (switchCase.expr) {
         this.inferExpressionType(switchCase.expr);
       }
@@ -9202,15 +9612,15 @@ var TypeValidator = class extends PhaseBase {
         }
       }
     }
-    if (switchNode.defCase) {
+    if (MatchNode.defCase) {
       if (exprScope) {
         this.config.services.contextTracker.withSavedState(() => {
           this.config.services.scopeManager.withScope(exprScope.id, () => {
-            this.validateStmt(switchNode.defCase.stmt);
+            this.validateStmt(MatchNode.defCase.stmt);
           });
         });
       } else {
-        this.validateStmt(switchNode.defCase.stmt);
+        this.validateStmt(MatchNode.defCase.stmt);
       }
     }
     return null;
@@ -9306,6 +9716,29 @@ var TypeValidator = class extends PhaseBase {
                 }
               } else if (!field.type && initType) {
                 field.type = initType;
+              }
+              if (field.initializer.is("Postfix")) {
+                const postfix = field.initializer.getPostfix();
+                if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+                  const access = postfix.getMemberAccess();
+                  const baseType = this.inferExpressionType(access.base);
+                  if (baseType) {
+                    const resolvedBase = this.resolveIdentifierType(baseType);
+                    if (resolvedBase.isEnum()) {
+                      const memberName = this.extractMemberName(access.target);
+                      const enumDef = resolvedBase.getEnum();
+                      const variant = enumDef.variants.find((v) => v.ident.name === memberName);
+                      if (variant && variant.type) {
+                        this.reportError(
+                          "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+                          `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                          field.initializer.span
+                        );
+                        return;
+                      }
+                    }
+                  }
+                }
               }
               if (field.type) {
                 this.validateValueFitsInType(field.initializer, field.type);
@@ -9450,8 +9883,8 @@ var TypeValidator = class extends PhaseBase {
       return;
     }
   }
-  validateSwitchExhaustiveness(switchNode) {
-    const condType = this.inferExpressionType(switchNode.condExpr);
+  validateSwitchExhaustiveness(MatchNode) {
+    const condType = this.inferExpressionType(MatchNode.condExpr);
     if (!condType) return;
     let resolvedType = condType;
     if (condType.isIdent()) {
@@ -9464,7 +9897,7 @@ var TypeValidator = class extends PhaseBase {
     if (resolvedType.isEnum()) {
       const enumType = resolvedType.getEnum();
       const coveredVariants = /* @__PURE__ */ new Set();
-      for (const switchCase of switchNode.cases) {
+      for (const switchCase of MatchNode.cases) {
         if (switchCase.expr) {
           const variantName = this.extractEnumVariantName(switchCase.expr);
           if (variantName) {
@@ -9472,7 +9905,7 @@ var TypeValidator = class extends PhaseBase {
           }
         }
       }
-      if (!switchNode.defCase) {
+      if (!MatchNode.defCase) {
         const missingVariants = [];
         for (const variant of enumType.variants) {
           if (!coveredVariants.has(variant.ident.name)) {
@@ -9483,19 +9916,19 @@ var TypeValidator = class extends PhaseBase {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
             `Switch is not exhaustive. Missing variants: ${missingVariants.join(", ")}`,
-            switchNode.span
+            MatchNode.span
           );
         }
       }
     }
     if (resolvedType.isBool()) {
-      const hasTrue = switchNode.cases.some((c) => this.isBoolLiteral(c.expr, true));
-      const hasFalse = switchNode.cases.some((c) => this.isBoolLiteral(c.expr, false));
-      if (!switchNode.defCase && (!hasTrue || !hasFalse)) {
+      const hasTrue = MatchNode.cases.some((c) => this.isBoolLiteral(c.expr, true));
+      const hasFalse = MatchNode.cases.some((c) => this.isBoolLiteral(c.expr, false));
+      if (!MatchNode.defCase && (!hasTrue || !hasFalse)) {
         this.reportError(
           "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-          "Switch on boolean must handle both true and false cases or have a default",
-          switchNode.span
+          "Match on boolean must handle both true and false cases or have a default",
+          MatchNode.span
         );
       }
     }
@@ -9721,32 +10154,18 @@ var TypeValidator = class extends PhaseBase {
     }
     const normalizedTarget = this.normalizeType(target);
     const normalizedSource = this.normalizeType(source);
-    if (this.isAnyType(normalizedTarget)) return true;
-    if (normalizedTarget.isErr()) {
-      if (this.isErrorType(normalizedSource)) {
-        return true;
-      }
-      if (normalizedSource.isIdent()) {
-        const sourceIdent = normalizedSource.getIdent();
-        const sourceSymbol = this.config.services.scopeManager.lookupSymbol(sourceIdent.name);
-        if (sourceSymbol && sourceSymbol.kind === "Error" /* Error */) {
-          return true;
-        }
-      }
-      return false;
-    }
-    if (this.isSameType(normalizedTarget, normalizedSource)) return true;
     const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
     const resolvedSource = this.resolveIdentifierType(normalizedSource);
+    if (this.isAnyType(resolvedTarget)) return true;
     if (this.isSameType(resolvedTarget, resolvedSource)) return true;
     if (resolvedTarget.isErr()) {
       if (this.isErrorType(resolvedSource)) {
         return true;
       }
       if (resolvedSource.isIdent()) {
-        const ident = resolvedSource.getIdent();
-        const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
-        if (symbol && symbol.kind === "Error" /* Error */) {
+        const sourceIdent = resolvedSource.getIdent();
+        const sourceSymbol = this.config.services.scopeManager.lookupSymbol(sourceIdent.name);
+        if (sourceSymbol && sourceSymbol.kind === "Error" /* Error */) {
           return true;
         }
       }
@@ -9767,32 +10186,64 @@ var TypeValidator = class extends PhaseBase {
         )
       );
     }
+    if (resolvedTarget.isUnion()) {
+      const unionType = resolvedTarget.getUnion();
+      if (normalizedSource.isIdent()) {
+        const sourceIdent = normalizedSource.getIdent();
+        const identMatch = unionType.types.some((memberType, idx) => {
+          if (memberType.isIdent()) {
+            const match = memberType.getIdent().name === sourceIdent.name;
+            return match;
+          }
+          return false;
+        });
+        if (identMatch) {
+          return true;
+        }
+      }
+      if (resolvedSource.isStruct()) {
+        const struct = resolvedSource.getStruct();
+        if (struct.name && struct.name !== "Anonymous") {
+          const structNameMatch = unionType.types.some((memberType, idx) => {
+            if (memberType.isIdent()) {
+              const match = memberType.getIdent().name === struct.name;
+              return match;
+            }
+            return false;
+          });
+          if (structNameMatch) {
+            return true;
+          }
+        }
+      }
+      const structuralMatch = unionType.types.some((memberType, idx) => {
+        const resolvedMember = this.resolveIdentifierType(memberType);
+        if (resolvedMember.isStruct() && resolvedSource.isStruct()) {
+          const result2 = this.areStructsStructurallyCompatible(
+            resolvedMember.getStruct(),
+            resolvedSource.getStruct()
+          );
+          return result2;
+        }
+        if (resolvedMember.isArray() && resolvedSource.isArray()) {
+          const result2 = this.areArrayTypesCompatible(resolvedMember, resolvedSource);
+          return result2;
+        }
+        const result = this.isTypeCompatible(resolvedMember, normalizedSource);
+        return result;
+      });
+      return structuralMatch;
+    }
+    if (resolvedSource.isUnion()) {
+      const sourceUnion = resolvedSource.getUnion();
+      return sourceUnion.types.every(
+        (sourceType) => this.isTypeCompatible(resolvedTarget, sourceType)
+      );
+    }
     if (resolvedTarget.isOptional()) {
       if (resolvedSource.isNull() || resolvedSource.isUndefined()) return true;
       const targetInner = resolvedTarget.getOptional().target;
-      return this.isTypeCompatible(targetInner, source);
-    }
-    if (resolvedTarget.isArray() && resolvedSource.isArray()) {
-      return this.areArrayTypesCompatible(resolvedTarget, resolvedSource);
-    }
-    if (resolvedTarget.isPointer()) {
-      if (resolvedSource.isNull()) return true;
-      if (resolvedSource.isPointer()) {
-        return this.arePointerTypesCompatible(resolvedTarget, resolvedSource);
-      }
-    }
-    if (resolvedTarget.isTuple() && resolvedSource.isTuple()) {
-      return this.areTupleTypesCompatible(resolvedTarget, resolvedSource);
-    }
-    if (resolvedTarget.isStruct() && resolvedSource.isStruct()) {
-      return this.areStructTypesCompatible(resolvedTarget, resolvedSource);
-    }
-    if (resolvedTarget.isEnum() && resolvedSource.isEnum()) {
-      return this.isSameType(resolvedTarget, resolvedSource);
-    }
-    if (resolvedTarget.isUnion()) {
-      const unionType = resolvedTarget.getUnion();
-      return unionType.types.some((type) => this.isTypeCompatible(type, source));
+      return this.isTypeCompatible(targetInner, resolvedSource);
     }
     if (resolvedSource.isOptional()) {
       const sourceInner = resolvedSource.getOptional().target;
@@ -9804,6 +10255,29 @@ var TypeValidator = class extends PhaseBase {
         const hasNull = unionType.types.some((t) => t.isNull());
         return hasInnerType && hasNull;
       }
+      return false;
+    }
+    if (resolvedTarget.isArray() && resolvedSource.isArray()) {
+      return this.areArrayTypesCompatible(resolvedTarget, resolvedSource);
+    }
+    if (resolvedTarget.isPointer()) {
+      if (resolvedSource.isNull()) return true;
+      if (resolvedSource.isPointer()) {
+        return this.arePointerTypesCompatible(resolvedTarget, resolvedSource);
+      }
+      return false;
+    }
+    if (resolvedTarget.isTuple() && resolvedSource.isTuple()) {
+      return this.areTupleTypesCompatible(resolvedTarget, resolvedSource);
+    }
+    if (resolvedTarget.isStruct() && resolvedSource.isStruct()) {
+      return this.areStructTypesCompatible(resolvedTarget, resolvedSource);
+    }
+    if (resolvedTarget.isEnum() && resolvedSource.isEnum()) {
+      return this.isSameType(resolvedTarget, resolvedSource);
+    }
+    if (resolvedTarget.isType()) {
+      return true;
     }
     return false;
   }
@@ -9989,8 +10463,25 @@ var TypeValidator = class extends PhaseBase {
   }
   areStructTypesCompatible(target, source) {
     var _a, _b;
-    const targetStruct = target.getStruct();
-    const sourceStruct = source.getStruct();
+    let resolvedTarget = target;
+    let resolvedSource = source;
+    if (target.isIdent()) {
+      const resolved = this.resolveIdentifierType(target);
+      if (resolved.isStruct()) {
+        resolvedTarget = resolved;
+      }
+    }
+    if (source.isIdent()) {
+      const resolved = this.resolveIdentifierType(source);
+      if (resolved.isStruct()) {
+        resolvedSource = resolved;
+      }
+    }
+    if (!resolvedTarget.isStruct() || !resolvedSource.isStruct()) {
+      return false;
+    }
+    const targetStruct = resolvedTarget.getStruct();
+    const sourceStruct = resolvedSource.getStruct();
     if (((_a = targetStruct.metadata) == null ? void 0 : _a.scopeId) !== void 0 && ((_b = sourceStruct.metadata) == null ? void 0 : _b.scopeId) !== void 0) {
       return targetStruct.metadata.scopeId === sourceStruct.metadata.scopeId;
     }
@@ -10004,25 +10495,29 @@ var TypeValidator = class extends PhaseBase {
     const sourceFields = /* @__PURE__ */ new Map();
     for (const member of target.members) {
       if (member.isField()) {
-        const field = member.source;
+        const field = member.getField();
         targetFields.set(field.ident.name, field);
       }
     }
     for (const member of source.members) {
       if (member.isField()) {
-        const field = member.source;
+        const field = member.getField();
         sourceFields.set(field.ident.name, field);
       }
+    }
+    if (targetFields.size !== sourceFields.size) {
+      return false;
     }
     for (const [fieldName, targetField] of targetFields) {
       const sourceField = sourceFields.get(fieldName);
       if (!sourceField) {
         return false;
       }
-      if (targetField.type && sourceField.type) {
-        if (!this.isTypeCompatible(targetField.type, sourceField.type)) {
-          return false;
-        }
+      if (!targetField.type || !sourceField.type) {
+        return false;
+      }
+      if (!this.isTypeCompatible(targetField.type, sourceField.type)) {
+        return false;
       }
     }
     return true;
@@ -10201,7 +10696,7 @@ var TypeValidator = class extends PhaseBase {
       case "Try":
       case "Catch":
       case "If":
-      case "Switch":
+      case "Match":
       case "Typeof":
       case "Sizeof":
         return null;
@@ -10229,12 +10724,6 @@ var TypeValidator = class extends PhaseBase {
     }
     return null;
   }
-  /**
-   * Normalizes a type by unwrapping all parentheses while preserving
-   * the original type for span-based error reporting.
-   *
-   * This ensures type comparisons work correctly regardless of parenthesization.
-   */
   normalizeType(type) {
     while (type.isParen()) {
       type = type.getParen().type;
@@ -10423,6 +10912,9 @@ var TypeValidator = class extends PhaseBase {
       return `[]${targetName}`;
     }
     const resolved = this.resolveIdentifierType(type);
+    if (this.isStringType(resolved)) {
+      return "slice";
+    }
     if (resolved.isStruct()) {
       const struct = resolved.getStruct();
       if (struct.name && struct.name !== "Anonymous") {
@@ -11089,8 +11581,13 @@ export {
   Analyzer,
   ContextTracker,
   DebugManager,
+  DeclarationPhase,
   DiagCode,
   DiagKind,
-  DiagnosticManager
+  DiagnosticManager,
+  ExpressionContext,
+  ScopeKind,
+  ScopeManager,
+  SymbolKind
 };
 //# sourceMappingURL=ast-analyzer.mjs.map

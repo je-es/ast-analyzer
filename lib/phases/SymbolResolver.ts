@@ -1350,8 +1350,8 @@
                         case 'If':
                             this.resolveIf(expr.getIf()!, contextSpan, parameterContext);
                             break;
-                        case 'Switch':
-                            this.resolveSwitch(expr.getSwitch()!, contextSpan, parameterContext);
+                        case 'Match':
+                            this.resolveSwitch(expr.getMatch()!, contextSpan, parameterContext);
                             break;
                         default:
                             this.log('verbose', `Unhandled expression type: ${expr.kind}`);
@@ -1773,13 +1773,13 @@
                 }
             }
 
-            private resolveSwitch(switchNode: AST.SwitchNode, contextSpan?: AST.Span, parameterContext?: FieldContext): void {
-                this.config.services.contextTracker.enterExpression(ExpressionContext.ConditionExpression, switchNode.condExpr.span);
-                this.resolveExprStmt(switchNode.condExpr, contextSpan, parameterContext);
+            private resolveSwitch(MatchNode: AST.MatchNode, contextSpan?: AST.Span, parameterContext?: FieldContext): void {
+                this.config.services.contextTracker.enterExpression(ExpressionContext.ConditionExpression, MatchNode.condExpr.span);
+                this.resolveExprStmt(MatchNode.condExpr, contextSpan, parameterContext);
                 this.config.services.contextTracker.exitExpression();
 
                 const currentScope = this.config.services.scopeManager.getCurrentScope();
-                for (const switchCase of switchNode.cases) {
+                for (const switchCase of MatchNode.cases) {
                     if (switchCase.expr) {
                         this.resolveExprStmt(switchCase.expr, contextSpan, parameterContext);
                     }
@@ -1788,8 +1788,8 @@
                     }
                 }
 
-                if (switchNode.defCase) {
-                    this.resolveStmt(switchNode.defCase.stmt, currentScope);
+                if (MatchNode.defCase) {
+                    this.resolveStmt(MatchNode.defCase.stmt, currentScope);
                 }
             }
 
@@ -1807,14 +1807,20 @@
             }
 
             private validateCallableSymbol(symbol: Symbol, span?: AST.Span): void {
+                // Quick check: Functions and callable metadata
                 if (symbol.kind === SymbolKind.Function || (symbol.metadata as any)?.callable === true) {
                     return;
                 }
 
-                if (symbol.type?.kind === 'function') {
-                    return;
+                // Resolve identifier types (BinaryOp -> fn(...))
+                if (symbol.type) {
+                    const resolvedType = this.resolveIdentifierType(symbol.type);
+                    if (resolvedType.kind === 'function') {
+                        return;
+                    }
                 }
 
+                // Check for imported functions
                 if (symbol.kind === SymbolKind.Use && symbol.importSource) {
                     const sourceModuleScope = this.config.services.scopeManager.findScopeByName(symbol.importSource, ScopeKind.Module);
                     if (sourceModuleScope) {
@@ -1845,6 +1851,22 @@
                     `Cannot call value of non-function type. '${symbol.name}' is a ${symbol.kind.toLowerCase()}`,
                     span
                 );
+            }
+
+            // Add this helper method if it doesn't exist:
+            private resolveIdentifierType(type: AST.TypeNode): AST.TypeNode {
+                if (!type.isIdent()) return type;
+
+                const ident = type.getIdent()!;
+                if (ident.builtin) return type;
+
+                const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+                if (symbol && symbol.type) {
+                    // Recursively resolve
+                    return this.resolveIdentifierType(symbol.type);
+                }
+
+                return type;
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -2373,6 +2395,7 @@
 
                     case 'union': {
                         const union = typeNode.getUnion()!;
+
                         for (const variantType of union.types) {
                             const tempVariantSymbol: Symbol = {
                                 id: -1,
@@ -2391,6 +2414,7 @@
                             };
                             if (!this.resolveType(variantType, tempVariantSymbol, contextSpan)) return false;
                         }
+
                         symbol.type = typeNode;
                         return true;
                     }

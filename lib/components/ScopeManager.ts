@@ -84,6 +84,7 @@
             callable?       : boolean;      // For callable symbols
             params?         : Symbol[];     // Function parameters
             returnType?     : AST.TypeNode; // Function return type
+            errorType?      : AST.TypeNode; // Function error type
             isAsync?        : boolean;      // Async function
             isStatic?       : boolean;      // Static member
             isAbstract?     : boolean;      // Abstract member

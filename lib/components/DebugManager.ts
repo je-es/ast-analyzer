@@ -112,7 +112,7 @@
                         }
                     }
 
-                    console.log(`${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`);
+                    // console.log(`${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`);
                 }
             }
 

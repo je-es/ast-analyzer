@@ -175,7 +175,7 @@
         describe("EntryModule", () => {
             it("should detect no entry module", () => {
                 const program   = AST.Program.create( [], { entryModule: 'main', path: './' } );
-                const analyzer  = Analyzer.create({ debug: 'off' });
+                const analyzer  = Analyzer.create({ debug: 'verbose' });
                 const result    = analyzer.analyze(program);
 
                 // TODO: improve this error code and msg (in SemanticValidator).

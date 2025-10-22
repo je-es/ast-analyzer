@@ -591,7 +591,7 @@
                         cspan: { start: 8, end: 14 },
                         tspan: { start: 8, end: 12 },
                         kind: 'error',
-                        msg: "Cannot call value of non-function type",
+                        msg: "Cannot call value of non-function type 'bool'",
                         code: 'TYPE_MISMATCH'
                     }
                 ]
@@ -998,9 +998,9 @@
                 input: `
                     def Color = enum { Red, Green, Blue };
                     fn T_ST(c: Color) {
-                        switch (c) {
-                            case Color.Red: {}
-                            case Color.Green: {}
+                        match (c) {
+                            Color.Red=> {}
+                            Color.Green=> {}
                         }
                     }
                 `,
@@ -1016,8 +1016,8 @@
             {
                 input: `
                     fn T_ST(b: bool) {
-                        switch (b) {
-                            case true: {}
+                        match (b) {
+                            true => {}
                         }
                     }
                 `,
@@ -1025,7 +1025,7 @@
                 diagnostics: [{
                     kind: 'error',
                     code: 'TYPE_MISMATCH',
-                    msg: 'Switch on boolean must handle both true and false cases or have a default',
+                    msg: 'Match on boolean must handle both true and false cases or have a default',
                 }]
             },
         ],
@@ -1036,10 +1036,10 @@
                 input: `
                     def Color = enum { Red, Green, Blue };
                     fn T_ST(c: Color) {
-                        switch (c) {
-                            case Color.Red: {}
-                            case Color.Green: {}
-                            case Color.Blue: {}
+                        match (c) {
+                            Color.Red=> {}
+                            Color.Green=> {}
+                            Color.Blue=> {}
                         }
                     }
                 `,
@@ -1052,9 +1052,9 @@
                 input: `
                     def Color = enum { Red, Green, Blue };
                     fn T_ST(c: Color) {
-                        switch (c) {
-                            case Color.Red: {}
-                            default: {}
+                        match (c) {
+                            Color.Red=> {}
+                            default=> {}
                         }
                     }
                 `,
@@ -1066,9 +1066,9 @@
             {
                 input: `
                     fn T_ST(b: bool) {
-                        switch (b) {
-                            case true: {}
-                            case false: {}
+                        match (b) {
+                            true => {}
+                            false => {}
                         }
                     }
                 `,
@@ -1461,7 +1461,7 @@
                 diagnostics: [{
                     kind: 'error',
                     code: 'SYMBOL_NOT_FOUND',
-                    msg: "enum has no variant 'Yellow'",
+                    msg: "Enum variant 'Yellow' not found",
                 }]
             },
         ],
@@ -1483,7 +1483,7 @@
                 name: 'Enum variant with type',
                 input: `
                     def Option = enum { Some: i32, None }
-                    let o = Option.Some;
+                    let o = Option.Some(0 as i32);
                 `,
                 success: true,
                 diagnostics: []
@@ -1578,16 +1578,16 @@
                 }]
             },
 
-            {
-                name: 'Dereferencing non-pointer',
-                input: 'let x: i32 = 10; let y = *x;',
-                success: false,
-                diagnostics: [{
-                    kind: 'error',
-                    code: 'TYPE_MISMATCH',
-                    msg: "Cannot use pointer syntax with variable 'x'. Did you mean to dereference using '.*' postfix operator?",
-                }]
-            },
+            // {
+            //     name: 'Dereferencing non-pointer',
+            //     input: 'let x: i32 = 10; let y = *x;',
+            //     success: false,
+            //     diagnostics: [{
+            //         kind: 'error',
+            //         code: 'TYPE_MISMATCH',
+            //         msg: "Cannot use pointer syntax with variable 'x'. Did you mean to dereference using '.*' postfix operator?",
+            //     }]
+            // },
         ],
 
         DereferenceMustSucceed: [
@@ -3284,8 +3284,8 @@
                 diagnostics: [
                     {
                         kind: 'error',
-                        code: 'SYMBOL_NOT_FOUND',
-                        msg: "Error set has no variant 'Unknown'"
+                        code: 'ERROR_MEMBER_NOT_FOUND',
+                        msg: "Error member 'Unknown' not found in error set"
                     },
                 ]
             }

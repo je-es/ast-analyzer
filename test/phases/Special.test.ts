@@ -495,8 +495,8 @@
                 success: false,
                 diagnostics: [{
                     kind: 'error',
-                    msg: "Error set has no variant 'DoesNotExist'",
-                    code: "SYMBOL_NOT_FOUND"
+                    msg: "Error member 'DoesNotExist' not found in error set",
+                    code: "ERROR_MEMBER_NOT_FOUND"
                 }]
             },
 
@@ -2748,15 +2748,664 @@
         ]
     };
 
+    const SliceTypeExtendedCases = {
+        SliceTypesCasesMustFail: [
+            // ======================== Invalid Member Access ========================
 
-    const temp = {
-        temp: [
+            // Non-existent member on slice
             {
-                name: 'comptime - function with arguments not yet supported',
-                input: 'comptime fn with_args(x: i32 = 10) -> i32 { return x * 2; } let arr: [with_args(5)]i32;',
+                name: 'slice - invalid member access',
+                input: `
+                    let message: slice = "Hello";
+                    let x = message.xxxx; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Type '[]u8' has no property 'xxxx'. Available: len",
+                    code: "SYMBOL_NOT_FOUND"
+                }]
+            },
+
+            // Try to access struct-like members
+            {
+                name: 'slice - attempt struct member access',
+                input: `
+                    let text: slice = "Test";
+                    let value = text.value; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Type '[]u8' has no property 'value'. Available: len",
+                    code: "SYMBOL_NOT_FOUND"
+                }]
+            },
+
+            // ======================== Invalid Operations ========================
+
+            // Cannot multiply strings
+            {
+                name: 'slice - cannot multiply',
+                input: `
+                    let text: slice = "Hello";
+                    let result = text * 3; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot perform Multiplicative operation on non-numeric types 'slice' and 'cint'", // More specific
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // Cannot subtract strings
+            {
+                name: 'slice - cannot subtract',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "World";
+                    let result = a - b; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot perform Additive operation on non-numeric types 'slice' and 'slice'", // More specific
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // Cannot use bitwise operations on strings
+            {
+                name: 'slice - cannot use bitwise AND',
+                input: `
+                    let a: slice = "A";
+                    let b: slice = "B";
+                    let result = a & b; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Bitwise operations require integer types, got 'slice' and 'slice'", // More specific
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // ======================== Invalid Indexing ========================
+
+            // Index with non-integer
+            {
+                name: 'slice - index with float',
+                input: `
+                    let text: slice = "Hello";
+                    let c = text[3.14]; // Should fail
+                `,
+                success: false,
+                diagnostics: [
+                    {
+                        kind: 'error',
+                        msg: "Array index must be integer type, got 'cflt'",
+                        code: "TYPE_MISMATCH"
+                    }
+                ]
+            },
+
+            // Index with string
+            {
+                name: 'slice - index with string',
+                input: `
+                    let text: slice = "Hello";
+                    let c = text["0"]; // Should fail
+                `,
+                success: false,
+                diagnostics: [
+                    {
+                        kind: 'error',
+                        msg: "Array index must be integer type, got '[]u8'",
+                        code: "TYPE_MISMATCH"
+                    }
+                ]
+            },
+
+            // ======================== Type Mismatches ========================
+
+            // Assign number to slice
+            {
+                name: 'slice - cannot assign number',
+                input: `
+                    let text: slice = 42; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot assign type 'cint' to variable of type 'slice'",
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // Concatenate slice with number
+            {
+                name: 'slice - cannot concat with number',
+                input: `
+                    let text: slice = "Value: ";
+                    let result = text + 42; // Should fail
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot concatenate string with non-string type",
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // ======================== Mutability Tests ========================
+            // Immutable + Immutable (should pass)
+            {
+                name: 'slice - immutable + immutable concatenation',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "World";
+                    let result = a + b;
+                `,
                 success: true,
                 diagnostics: []
             },
+
+            // Immutable literal + Immutable literal (should pass)
+            {
+                name: 'slice - literal + literal concatenation',
+                input: `
+                    let result = "Hello" + " " + "World";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Multiple immutable concatenations (should pass)
+            {
+                name: 'slice - chain immutable concatenation',
+                input: `
+                    let first: slice = "Hello";
+                    let second: slice = "World";
+                    let third: slice = "!";
+                    let result = first + " " + second + " " + third;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Mutability Mismatch Tests ========================
+
+            // // Mutable + Immutable (should fail)
+            // {
+            //     name: 'slice - cannot concat mutable with immutable',
+            //     input: `
+            //         let mut my_mut_arr: slice = "Maysara";
+            //         let full_message: slice = "Hello";
+            //         let xxx = my_mut_arr + full_message;
+            //     `,
+            //     success: false,
+            //     diagnostics: [{
+            //         kind: 'error',
+            //         code: 'MUTABILITY_MISMATCH',
+            //         msg: "Cannot concatenate arrays with different mutability"
+            //     }]
+            // },
+
+            // // Immutable + Mutable (should fail)
+            // {
+            //     name: 'slice - cannot concat immutable with mutable',
+            //     input: `
+            //         let immutable: slice = "Hello";
+            //         let mut mutable: slice = "World";
+            //         let result = immutable + mutable;
+            //     `,
+            //     success: false,
+            //     diagnostics: [{
+            //         kind: 'error',
+            //         code: 'MUTABILITY_MISMATCH',
+            //         msg: "Cannot concatenate arrays with different mutability"
+            //     }]
+            // },
+
+            // // Chain with mixed mutability (should fail)
+            // {
+            //     name: 'slice - cannot chain mixed mutability',
+            //     input: `
+            //         let a: slice = "Hello";
+            //         let mut b: slice = "World";
+            //         let c: slice = "!";
+            //         let result = a + b + c;
+            //     `,
+            //     success: false,
+            //     diagnostics: [{
+            //         kind: 'error',
+            //         code: 'MUTABILITY_MISMATCH',
+            //         msg: "Cannot concatenate arrays with different mutability"
+            //     }]
+            // },
+
+            // ======================== Subtraction Tests ========================
+
+            // Cannot subtract strings (should fail)
+            {
+                name: 'slice - cannot subtract',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "World";
+                    let result = a - b;
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot perform Additive operation on non-numeric types 'slice' and 'slice'",
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // Cannot subtract mutable strings (should fail)
+            {
+                name: 'slice - cannot subtract mutable',
+                input: `
+                    let mut a: slice = "Hello";
+                    let mut b: slice = "World";
+                    let result = a - b;
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    msg: "Cannot perform Additive operation on non-numeric types 'slice' and 'slice'",
+                    code: "TYPE_MISMATCH"
+                }]
+            },
+
+            // ======================== Type Mismatch Tests ========================
+
+            // Cannot concat string with number (should fail)
+            {
+                name: 'slice - cannot concat with number',
+                input: `
+                    let text: slice = "Count: ";
+                    let num: i32 = 42;
+                    let result = text + num;
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    code: 'TYPE_MISMATCH',
+                    msg: "Cannot concatenate string with non-string type"
+                }]
+            },
+
+            // Cannot concat string with bool (should fail)
+            {
+                name: 'slice - cannot concat with bool',
+                input: `
+                    let text: slice = "Value: ";
+                    let flag: bool = true;
+                    let result = text + flag;
+                `,
+                success: false,
+                diagnostics: [{
+                    kind: 'error',
+                    code: 'TYPE_MISMATCH',
+                    msg: "Cannot concatenate string with non-string type"
+                }]
+            },
+
+            // Mutable + Mutable (should pass if you support mutable arrays)
+            {
+                name: 'slice - mutable + mutable concatenation',
+                input: `
+                    let mut a: slice = "Hello";
+                    let mut b: slice = "World";
+                    let mut result = a + b;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Mutable chain concatenation (should pass)
+            {
+                name: 'slice - chain mutable concatenation',
+                input: `
+                    let mut first: slice = "Hello";
+                    let mut second: slice = "World";
+                    let mut third: slice = "!";
+                    let mut result = first + " " + second + " " + third;
+                `,
+                success: true,
+                diagnostics: []
+            },
+        ],
+
+        SliceTypesCasesMustSucceed: [
+            // ======================== Basic Slice Operations ========================
+
+            // UTF-8 string literals
+            {
+                name: 'slice - UTF-8 string literal',
+                input: `
+                    let greeting: slice = "أهلًا بك";
+                    let name: slice = "ميسرة خالد";
+                    let mixed: slice = "Hello مرحبا 你好";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // String concatenation
+            {
+                name: 'slice - concatenation with + operator',
+                input: `
+                    let greeting: slice = "Hello";
+                    let name: slice = "World";
+                    let message = greeting + " " + name;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Empty string
+            {
+                name: 'slice - empty string',
+                input: `
+                    let empty: slice = "";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Multi-line string
+            {
+                name: 'slice - multi-line string',
+                input: `
+                    let poem: slice = "
+                        السطر الأول
+                        السطر الثاني
+                        السطر الثالث
+                    ";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Length Property ========================
+
+            // Access .len property
+            {
+                name: 'slice - access .len property',
+                input: `
+                    let text: slice = "Hello";
+                    let length = text.len;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Use .len in expressions
+            {
+                name: 'slice - use .len in arithmetic',
+                input: `
+                    let text: slice = "Test";
+                    let size = text.len + usize(5);
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Indexing ========================
+
+            // Single character access
+            {
+                name: 'slice - single index access',
+                input: `
+                    let text: slice = "Hello";
+                    let first: u8 = text[0];
+                    let last: u8 = text[4];
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Range slicing
+            {
+                name: 'slice - range slicing',
+                input: `
+                    let text: slice = "Hello World";
+                    let substring: slice = text[0..5];
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Open-ended range
+            {
+                name: 'slice - open-ended range',
+                input: `
+                    let text: slice = "Hello";
+                    let from_start: slice = text[0..3];
+                    let to_end: slice = text[2..];
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Comparisons ========================
+
+            // String equality
+            {
+                name: 'slice - equality comparison',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "Hello";
+                    let are_equal = a == b;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // String inequality
+            {
+                name: 'slice - inequality comparison',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "World";
+                    let are_different = a != b;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Functions ========================
+
+            // Slice parameter
+            {
+                name: 'slice - as function parameter',
+                input: `
+                    fn greet(name: slice) -> slice {
+                        return "Hello " + name;
+                    }
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Slice return type
+            {
+                name: 'slice - as function return',
+                input: `
+                    fn get_message() -> slice {
+                        return "Test message";
+                    }
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Structs ========================
+
+            // Slice in struct field
+            {
+                name: 'slice - in struct field',
+                input: `
+                    def User = struct {
+                        name: slice;
+                        email: slice;
+                    };
+
+                    let user = new User {
+                        name: "Alice",
+                        email: "alice@example.com"
+                    };
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Optional slice
+            {
+                name: 'slice - optional slice field',
+                input: `
+                    def User = struct {
+                        name: slice;
+                        nickname: ?slice;
+                    };
+
+                    let user = new User {
+                        name: "Bob",
+                        nickname: null
+                    };
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Arrays of Slices ========================
+
+            // Array of strings
+            {
+                name: 'slice - array of slices',
+                input: `
+                    let names: [3]slice = ["Alice", "Bob", "Charlie"];
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Complex Scenarios ========================
+
+            // Nested concatenation
+            {
+                name: 'slice - nested concatenation',
+                input: `
+                    let first: slice = "Hello";
+                    let second: slice = "World";
+                    let third: slice = "!";
+                    let result = first + " " + second + third;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Slice with Unicode
+            {
+                name: 'slice - unicode characters',
+                input: `
+                    let arabic: slice = "مرحبا";
+                    let chinese: slice = "你好";
+                    let emoji: slice = "👋🌍";
+                    let mixed = arabic + " " + chinese + " " + emoji;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Slice in conditionals
+            {
+                name: 'slice - in conditional',
+                input: `
+                    let name: slice = "Alice";
+                    if (name == "Alice") {
+                        let greeting = "Hello " + name;
+                    }
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Slice with escapes
+            {
+                name: 'slice - escape sequences',
+                input: `
+                    let text: slice = "Line 1\\nLine 2\\tTabbed";
+                    let quote: slice = "\\"Quoted\\"";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // ======================== Mutability Tests ========================
+
+            // Immutable + Immutable (should pass)
+            {
+                name: 'slice - immutable + immutable concatenation',
+                input: `
+                    let a: slice = "Hello";
+                    let b: slice = "World";
+                    let result = a + b;
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Immutable literal + Immutable literal (should pass)
+            {
+                name: 'slice - literal + literal concatenation',
+                input: `
+                    let result = "Hello" + " " + "World";
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            // Multiple immutable concatenations (should pass)
+            {
+                name: 'slice - chain immutable concatenation',
+                input: `
+                    let first: slice = "Hello";
+                    let second: slice = "World";
+                    let third: slice = "!";
+                    let result = first + " " + second + " " + third;
+                `,
+                success: true,
+                diagnostics: []
+            },
+        ]
+    };
+
+    const temp = {
+        temp: [
+            // {
+            //     input: `
+            //     def Point = struct { x: i32; y: i32 };
+            //     def DataValue = i32 | [5]u8 | Point;
+            //     let mut data : DataValue = [1, 2, 3, 4, 5];
+            //     data = new Point { x: 10, y: 5 }; // [FIXED] BUG: Cannot assign type 'Point' to 'DataValue'kls(TYPE_MISMATCH)
+            //     `,
+            //     success: true,
+            //     diagnostics: []
+            // },
+
+            // {
+            //     input: `
+            //     def DataValue = i32 | [5]u8 | struct { x: i32; y: i32 };
+            //     let mut data : DataValue = [1, 2, 3, 4, 5];
+            //     data = { x: 10, y: 5 }; // [FIXED] BUG: Cannot assign type 'Point' to 'DataValue'kls(TYPE_MISMATCH)
+            //     `,
+            //     success: true,
+            //     diagnostics: []
+            // },
         ]
     }
 
@@ -2772,6 +3421,7 @@
         ...OptionalTypesExtendedCases,
         ...PointerTypesExtendedCases,
         ...ComptimeExtendedCases,
+        ...SliceTypeExtendedCases,
         // ...temp
 
     }, AnalysisPhase.TypeValidation);

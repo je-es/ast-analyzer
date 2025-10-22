@@ -517,6 +517,35 @@
                             }
                         }
                     }
+
+                    // NEW: Check if initializer is an enum variant that requires a value
+                    if (letNode.field.initializer.is('Postfix')) {
+                        const postfix = letNode.field.initializer.getPostfix();
+                        if (postfix?.kind === 'MemberAccess') {
+                            const access = postfix.getMemberAccess()!;
+                            const baseType = this.inferExpressionType(access.base);
+
+                            if (baseType) {
+                                const resolvedBase = this.resolveIdentifierType(baseType);
+
+                                if (resolvedBase.isEnum()) {
+                                    const memberName = this.extractMemberName(access.target);
+                                    const enumDef = resolvedBase.getEnum()!;
+                                    const variant = enumDef.variants.find(v => v.ident.name === memberName);
+
+                                    if (variant && variant.type) {
+                                        this.reportError(
+                                            DiagCode.TYPE_MISMATCH,
+                                            `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                                            letNode.field.initializer.span
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 } else if (!letNode.field.type) {
                     this.reportError(
                         DiagCode.CANNOT_INFER_TYPE,
@@ -524,6 +553,7 @@
                         letNode.field.span
                     );
                 }
+
                 symbol.isTypeChecked = true;
             }
 
@@ -762,6 +792,34 @@
                                     `Cannot assign type '${this.getTypeDisplayName(initType)}' to parameter of type '${this.getTypeDisplayName(paramNode.type)}'`,
                                     paramNode.initializer.span
                                 );
+                            }
+                        }
+                    }
+
+                    // NEW: Check if initializer is an enum variant that requires a value
+                    if (paramNode.initializer.is('Postfix')) {
+                        const postfix = paramNode.initializer.getPostfix();
+                        if (postfix?.kind === 'MemberAccess') {
+                            const access = postfix.getMemberAccess()!;
+                            const baseType = this.inferExpressionType(access.base);
+
+                            if (baseType) {
+                                const resolvedBase = this.resolveIdentifierType(baseType);
+
+                                if (resolvedBase.isEnum()) {
+                                    const memberName = this.extractMemberName(access.target);
+                                    const enumDef = resolvedBase.getEnum()!;
+                                    const variant = enumDef.variants.find(v => v.ident.name === memberName);
+
+                                    if (variant && variant.type) {
+                                        this.reportError(
+                                            DiagCode.TYPE_MISMATCH,
+                                            `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                                            paramNode.initializer.span
+                                        );
+                                        return;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1518,6 +1576,8 @@
                     }
 
                     const funcType = funcSymbol.type.getFunction()!;
+                    if(funcSymbol.metadata) { funcSymbol.metadata.errorType = funcType.errorType; }
+
                     return funcType.errorType || null;
                 }
             }
@@ -1620,8 +1680,8 @@
                             return this.inferCatchType(expr.getCatch()!);
                         case 'If':
                             return this.inferIfType(expr.getIf()!);
-                        case 'Switch':
-                            return this.inferSwitchType(expr.getSwitch()!);
+                        case 'Match':
+                            return this.inferSwitchType(expr.getMatch()!);
                         default:
                             return null;
                     }
@@ -1968,6 +2028,11 @@
                     return symbol.type;
                 }
 
+                // If this is a type definition (like slice, char, cpoint), return 'type' primitive
+                if (symbol.kind === SymbolKind.Definition && symbol.type?.isType()) {
+                    return AST.TypeNode.asPrimitive(ident.span, 'type');
+                }
+
                 if (symbol.type) return symbol.type;
 
                 if (symbol.kind === SymbolKind.Function && symbol.metadata) {
@@ -2015,20 +2080,13 @@
                     return;
                 }
 
-                // CASE 2: Calling static method on INSTANCE (Error)
-                if (!isStaticAccess && isStaticMethod) {
-                    // // Get struct name from method's parent scope
-                    // const methodScope = this.config.services.scopeManager.getScope(methodSymbol.scope);
-                    // const structName = methodScope.name;
-
-                    // this.reportError(
-                    //     DiagCode.INVALID_STATIC_ACCESS,
-                    //     `Cannot call static method '${methodSymbol.name}' on instance. Use '${structName}.${methodSymbol.name}()' instead.`,
-                    //     call.span
-                    // );
-
-                    // Just continue - this is valid
-                    return;
+                // CASE 2: Static calling instance via Type.method() - ADD THIS CHECK
+                if (isStaticAccess && isStaticMethod) {
+                    // Check if we're in a static method context
+                    if (this.currentIsStaticMethod) {
+                        // Verify the called method is also static
+                        // (already checked above, but this prevents static->instance calls)
+                    }
                 }
             }
 
@@ -2078,6 +2136,42 @@
                 }
 
                 // CASE 2: Anonymous object literal
+                // NEW: Check if we're in an assignment/initialization context with an expected type
+                const expectedType = this.getExpectedTypeFromContext();
+
+                if (expectedType) {
+                    const resolvedExpected = this.resolveIdentifierType(expectedType);
+
+                    // If expected type is a union, check if any member is a matching struct
+                    if (resolvedExpected.isUnion()) {
+                        const unionType = resolvedExpected.getUnion()!;
+
+                        for (const memberType of unionType.types) {
+                            const resolvedMember = this.resolveIdentifierType(memberType);
+
+                            if (resolvedMember.isStruct()) {
+                                const struct = resolvedMember.getStruct()!;
+
+                                // Check if object literal matches this struct's shape
+                                if (this.doesObjectMatchStruct(obj, struct)) {
+                                    // Return the union member type, not a new anonymous struct
+                                    return memberType;
+                                }
+                            }
+                        }
+                    }
+
+                    // If expected type is directly a struct
+                    if (resolvedExpected.isStruct()) {
+                        const struct = resolvedExpected.getStruct()!;
+
+                        if (this.doesObjectMatchStruct(obj, struct)) {
+                            return expectedType;
+                        }
+                    }
+                }
+
+                // Fall back to creating anonymous struct (existing code)
                 const fields: AST.TypeNode[] = [];
                 const fieldNodes: AST.FieldNode[] = [];
 
@@ -2113,6 +2207,41 @@
                 return AST.TypeNode.asStruct(obj.span, members, 'Anonymous');
             }
 
+            // Helper method to check if object literal matches struct shape
+            private doesObjectMatchStruct(obj: AST.ObjectNode, struct: AST.StructTypeNode): boolean {
+                const structFields = new Map<string, AST.FieldNode>();
+
+                for (const member of struct.members) {
+                    if (member.isField()) {
+                        const field = member.source as AST.FieldNode;
+                        structFields.set(field.ident.name, field);
+                    }
+                }
+
+                // Check if object has same fields (ignoring order)
+                if (obj.props.length !== structFields.size) {
+                    return false;
+                }
+
+                for (const prop of obj.props) {
+                    const structField = structFields.get(prop.key.name);
+
+                    if (!structField) {
+                        return false; // Object has field not in struct
+                    }
+
+                    // Could add type compatibility check here if needed
+                    if (prop.val && structField.type) {
+                        const propType = this.inferExpressionType(prop.val);
+                        if (propType && !this.isTypeCompatible(structField.type, propType)) {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            }
+
             private inferTupleType(tuple: AST.ExprTupleNode): AST.TypeNode | null {
                 const fieldTypes: AST.TypeNode[] = [];
 
@@ -2126,6 +2255,90 @@
             }
 
             // ===== BINARY OPERATIONS =====
+
+            private getExpressionMutability(expr: AST.ExprNode): 'Mutable' | 'Immutable' | 'Literal' | 'Unset' {
+            // For identifiers, look up the symbol
+                if (expr.is('Primary')) {
+                    const primary = expr.getPrimary();
+                    if (primary?.is('Ident')) {
+                        const ident = primary.getIdent();
+                        if (ident) {
+                            const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+                            if (symbol) {
+
+                                // [] mut u8
+                                if(symbol.type?.isArray()) {
+                                    return symbol.type?.getArray()?.mutable ? 'Mutable' : 'Immutable';
+                                }
+
+                                // let mut ..
+                                // return symbol.mutability.kind;
+                            }
+                        }
+                    }
+
+                    // String literals - special case (compatible with both)
+                    if (primary?.is('Literal')) {
+                        const literal = primary.getLiteral();
+                        if (literal?.kind === 'String') {
+                            return 'Literal';  // Changed from 'Immutable'
+                        }
+                    }
+                }
+
+                // For binary expressions (chained concatenation)
+                if (expr.is('Binary')) {
+                    const binary = expr.getBinary()!;
+                    if (binary.kind === 'Additive' && binary.operator === '+') {
+                        const leftMut = this.getExpressionMutability(binary.left);
+                        const rightMut = this.getExpressionMutability(binary.right);
+
+                        // Ignore literals - they're compatible with everything
+                        if (leftMut === 'Literal') return rightMut;
+                        if (rightMut === 'Literal') return leftMut;
+
+                        // If mixing mutable and immutable variables, that's an error
+                        if ((leftMut === 'Mutable') !== (rightMut === 'Mutable')) {
+                            return 'Unset'; // Signal incompatibility
+                        }
+
+                        // Both same mutability
+                        return leftMut;
+                    }
+                }
+
+                // For member access (obj.field), check the field's mutability
+                if (expr.is('Postfix')) {
+                    const postfix = expr.getPostfix();
+                    if (postfix?.kind === 'MemberAccess') {
+                        const access = postfix.getMemberAccess()!;
+                        const memberName = this.extractMemberName(access.target);
+
+                        if (memberName) {
+                            const baseType = this.inferExpressionType(access.base);
+                            if (baseType) {
+                                const resolvedBase = this.resolveIdentifierType(baseType);
+                                if (resolvedBase.isStruct()) {
+                                    const struct = resolvedBase.getStruct()!;
+                                    const scopeId = struct.metadata?.scopeId as number | undefined;
+
+                                    if (scopeId !== undefined) {
+                                        const structScope = this.config.services.scopeManager.getScope(scopeId);
+                                        const fieldSymbol = structScope.symbols.get(memberName);
+
+                                        if (fieldSymbol) {
+                                            return fieldSymbol.mutability.kind;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cannot determine mutability - assume immutable (safest default)
+                return 'Immutable';
+            }
 
             private inferBinaryType(binary: AST.BinaryNode): AST.TypeNode | null {
                 if (!binary.left || !binary.right) return null;
@@ -2151,6 +2364,51 @@
                         binary.span
                     );
                     return null;
+                }
+
+                // slice/u8Array
+                if(binary.kind === 'Additive' && binary.operator === '+') {
+                    // Resolve both types to their base forms (slice -> []u8)
+                    const resolvedLeft = this.resolveIdentifierType(leftType);
+                    const resolvedRight = this.resolveIdentifierType(rightType);
+
+                    const leftIsString = this.isStringType(resolvedLeft);
+                    const rightIsString = this.isStringType(resolvedRight);
+
+                    if (leftIsString && rightIsString) {
+                        const leftMutability = this.getExpressionMutability(binary.left);
+                        const rightMutability = this.getExpressionMutability(binary.right);
+
+                        // Ignore literals - they're compatible with everything
+                        const leftEffective = leftMutability === 'Literal' ? null : leftMutability;
+                        const rightEffective = rightMutability === 'Literal' ? null : rightMutability;
+
+                        // If both are non-literals, they must match
+                        if (leftEffective !== null && rightEffective !== null) {
+                            if (leftEffective !== rightEffective) {
+                                this.reportError(
+                                    DiagCode.MUTABILITY_MISMATCH,
+                                    `Cannot concatenate arrays with different mutability`,
+                                    binary.span
+                                );
+                                return null;
+                            }
+                        }
+
+                        return leftType;
+                    }
+
+                    // Reject: mixing strings with non-strings
+                    if (leftIsString || rightIsString) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Cannot concatenate string with non-string type`,
+                            binary.span
+                        );
+                        return null;
+                    }
+
+                    // If neither is string, fall through to numeric check below
                 }
 
                 switch (binary.kind) {
@@ -2379,20 +2637,6 @@
                 }
             }
 
-            /**
-             * Checks if an expression is an lvalue (has a memory location that can be referenced).
-             *
-             * Lvalues include:
-             * - Variables: x, y, myVar
-             * - Dereferences: ptr.*, arr[0]
-             * - Member access: obj.field, self.x
-             *
-             * Non-lvalues (cannot take address):
-             * - Literals: 42, "hello", true
-             * - Function calls: foo()
-             * - Arithmetic: x + y
-             * - Temporary values
-             */
             private isLValueExpression(expr: AST.ExprNode): boolean {
                 switch (expr.kind) {
                     case 'Primary': {
@@ -2475,7 +2719,7 @@
                     case 'Try':
                     case 'Catch':
                     case 'If':
-                    case 'Switch':
+                    case 'Match':
                     case 'Typeof':
                     case 'Sizeof':
                         // All of these return temporary values, not lvalues
@@ -2485,7 +2729,6 @@
                         return false;
                 }
             }
-
 
             // ===== POSTFIX OPERATIONS =====
 
@@ -2552,7 +2795,7 @@
                     return this.validateBuiltinCall(call);
                 }
 
-                // Check if method call and validate context
+                // Check if this is an enum variant constructor BEFORE checking methods
                 if (call.base.is('Postfix')) {
                     const postfix = call.base.getPostfix();
                     if (postfix?.kind === 'MemberAccess') {
@@ -2561,6 +2804,10 @@
 
                         if (baseType) {
                             const resolvedBase = this.resolveIdentifierType(baseType);
+
+                            if (resolvedBase.isEnum()) {
+                                return this.validateEnumVariantConstruction(call, access, resolvedBase);
+                            }
 
                             if (resolvedBase.isStruct()) {
                                 const memberName = this.extractMemberName(access.target);
@@ -2573,11 +2820,8 @@
                                         const methodSymbol = structScope.symbols.get(memberName);
 
                                         if (methodSymbol && methodSymbol.kind === SymbolKind.Function) {
-                                            // Validate call context (static vs instance)
                                             const isStaticAccess = this.isStaticMemberAccess(access.base);
                                             this.validateMethodCallContext(call, methodSymbol, isStaticAccess, access.base);
-
-                                            // Validate visibility
                                             this.validateMemberVisibility(methodSymbol, structScope, access.target.span);
                                         }
                                     }
@@ -2597,16 +2841,90 @@
                     return null;
                 }
 
-                if (calleeType.isFunction()) {
-                    return this.validateCallArgumentsWithContext(call, calleeType);
+                // RESOLVE IDENTIFIER TYPES (BinaryOp -> fn(i32, i32) -> i32)
+                const resolvedCalleeType = this.resolveIdentifierType(calleeType);
+
+                if (resolvedCalleeType.isFunction()) {
+                    return this.validateCallArgumentsWithContext(call, resolvedCalleeType);
                 }
 
+                // Now the error is accurate
                 this.reportError(
                     DiagCode.TYPE_MISMATCH,
-                    `Cannot call value of non-function type`,
+                    `Cannot call value of non-function type '${this.getTypeDisplayName(calleeType)}'`,
                     call.base.span
                 );
                 return null;
+            }
+
+            private validateEnumVariantConstruction(
+                call: AST.CallNode,
+                access: AST.MemberAccessNode,
+                enumType: AST.TypeNode
+            ): AST.TypeNode | null {
+                const variantName = this.extractMemberName(access.target);
+                if (!variantName) return null;
+
+                const enumDef = enumType.getEnum()!;
+                const scopeId = enumDef.metadata?.scopeId as number | undefined;
+
+                if (scopeId === undefined) {
+                    this.reportError(
+                        DiagCode.INTERNAL_ERROR,
+                        `Cannot find scope for enum`,
+                        call.span
+                    );
+                    return null;
+                }
+
+                const enumScope = this.config.services.scopeManager.getScope(scopeId);
+                const variantSymbol = enumScope.symbols.get(variantName);
+
+                if (!variantSymbol || variantSymbol.kind !== SymbolKind.EnumVariant) {
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        `Variant '${variantName}' not found in enum`,
+                        access.target.span
+                    );
+                    return null;
+                }
+
+                // Find the variant definition
+                const variant = enumDef.variants.find(v => v.ident.name === variantName);
+                if (!variant) return null;
+
+                // Check if variant has associated type
+                if (!variant.type) {
+                    this.reportError(
+                        DiagCode.TOO_MANY_ARGUMENTS,
+                        `Variant '${variantName}' does not take any arguments`,
+                        call.span
+                    );
+                    return null;
+                }
+
+                // Validate argument count (should be exactly 1 for now)
+                if (call.args.length !== 1) {
+                    this.reportError(
+                        DiagCode.TOO_MANY_ARGUMENTS,
+                        `Variant '${variantName}' expects exactly 1 argument`,
+                        call.span
+                    );
+                    return null;
+                }
+
+                // Validate argument type
+                const argType = this.inferExpressionType(call.args[0]);
+                if (argType && !this.isTypeCompatible(variant.type, argType)) {
+                    this.reportError(
+                        DiagCode.TYPE_MISMATCH,
+                        `Argument type '${this.getTypeDisplayName(argType)}' is not compatible with variant type '${this.getTypeDisplayName(variant.type)}'`,
+                        call.args[0].span
+                    );
+                }
+
+                // Return the enum type itself
+                return enumType;
             }
 
             private validateMemberVisibility(
@@ -2840,6 +3158,15 @@
 
                 if (!baseType) return null;
 
+                // NEW: Resolve type aliases (slice -> []u8)
+                const resolvedType = this.resolveIdentifierType(baseType);
+
+                // Handle range indexing
+                if (access.index.kind === 'Range') {
+                    // Return same type as base ([]u8 for slice)
+                    return resolvedType;
+                }
+
                 if (indexType && !this.isIntegerType(indexType)) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
@@ -2848,12 +3175,14 @@
                     );
                 }
 
-                if (baseType.isArray()) {
-                    return baseType.getArray()!.target;
+                // Check if it's a tuple type
+                if (resolvedType.isTuple()) {
+                    return this.inferTupleIndexAccess(resolvedType, access.index, access.span);
                 }
 
-                if (this.isStringType(baseType)) {
-                    return AST.TypeNode.asUnsigned(access.span, 'u8', 8);
+                // Check resolved type for arrays/strings
+                if (resolvedType.isArray() || this.isStringType(resolvedType)) {
+                    return resolvedType.getArray()!.target;
                 }
 
                 this.reportError(
@@ -2864,9 +3193,40 @@
                 return null;
             }
 
+            private inferTupleIndexAccess(tupleType: AST.TypeNode, indexExpr: AST.ExprNode, span: AST.Span): AST.TypeNode | null {
+                const tuple = tupleType.getTuple()!;
+
+                // Try to evaluate index as compile-time constant
+                const indexValue = this.ExpressionEvaluator.evaluateComptimeExpression(indexExpr);
+
+                if (indexValue === null) {
+                    this.reportError(
+                        DiagCode.TYPE_MISMATCH,
+                        `Tuple index must be a compile-time constant`,
+                        indexExpr.span
+                    );
+                    return null;
+                }
+
+                const index = Number(indexValue);
+
+                // Validate index range
+                if (index < 0 || index >= tuple.fields.length) {
+                    this.reportError(
+                        DiagCode.TYPE_MISMATCH,
+                        `Tuple index ${index} out of bounds (tuple has ${tuple.fields.length} field${tuple.fields.length !== 1 ? 's' : ''})`,
+                        indexExpr.span
+                    );
+                    return null;
+                }
+
+                return tuple.fields[index];
+            }
+
             private inferMemberAccessType(access: AST.MemberAccessNode): AST.TypeNode | null {
                 // DEBUG: Log the current context
                 this.log('verbose', `inferMemberAccessType: currentIsStaticMethod=${this.currentIsStaticMethod}, currentStructScope=${this.currentStructScope?.name || 'null'}`);
+
 
                 // Check wildcard imports FIRST, before inferring base type
                 if (access.base.is('Primary')) {
@@ -2938,6 +3298,49 @@
                     return null;
                 }
 
+                // NEW: Resolve type aliases (slice -> []u8)
+                baseType = this.resolveIdentifierType(baseType);
+
+                // NEW: Handle built-in array/slice properties
+                if (baseType.isArray() || this.isStringType(baseType)) {
+                    const memberName = this.extractMemberName(access.target);
+
+                    if (memberName === 'len') {
+                        // Return usize for length
+                        return AST.TypeNode.asUnsigned(access.span, 'usize', 64);
+                    }
+
+                    // TODO:
+                    // if (memberName === 'ptr') {
+                    // }
+
+                    // Reject other members
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        `Type '${this.getTypeDisplayName(baseType)}' has no property '${memberName}'. Available: len`,
+                        access.target.span
+                    );
+                    return null;
+                }
+
+                // NEW: Handle built-in tuple properties
+                if (baseType.isTuple()) {
+                    const memberName = this.extractMemberName(access.target);
+
+                    if (memberName === 'len') {
+                        // Return usize for length
+                        return AST.TypeNode.asUnsigned(access.span, 'usize', 64);
+                    }
+
+                    // Reject other members
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        `Type '${this.getTypeDisplayName(baseType)}' has no property '${memberName}'. Available: len`,
+                        access.target.span
+                    );
+                    return null;
+                }
+
                 if (access.optional && !baseType.isOptional()) {
                     this.reportError(
                         DiagCode.TYPE_MISMATCH,
@@ -2976,6 +3379,25 @@
                     if (typeSymbol?.type) {
                         unwrappedType = typeSymbol.type;
                     }
+                }
+
+                if (unwrappedType.isEnum()) {
+                    const memberType = this.resolveEnumMember(unwrappedType, access);
+
+                    // NEW: Check if variant requires a value but is used without construction
+                    if (memberType) {
+                        const enumDef = unwrappedType.getEnum()!;
+                        const memberName = this.extractMemberName(access.target);
+                        const variant = enumDef.variants.find(v => v.ident.name === memberName);
+
+                        if (variant && variant.type) {
+                            // This variant has an associated type but is accessed without ()
+                            // Only error if it's NOT being called (checked in parent context)
+                            // We'll handle this in the validation phase
+                        }
+                    }
+
+                    return memberType;
                 }
 
                 // Check if accessing static member on type identifier
@@ -3258,6 +3680,14 @@
                             return variant.type || enumType;
                         }
                     }
+
+                    // ADD THIS: Report error if variant not found
+                    this.reportError(
+                        DiagCode.SYMBOL_NOT_FOUND,
+                        `Enum variant '${memberName}' not found`,
+                        access.target.span
+                    );
+                    return null;
                 }
 
                 // Handle error types - use 'members' not 'variants'
@@ -3265,15 +3695,23 @@
                     const errorType = enumType.getErrset()!;
                     for (const member of errorType.members) {
                         if (member.name === memberName) {
-                            // Return an identifier type for the error member
                             return AST.TypeNode.asIdentifier(member.span, member.name);
                         }
                     }
+
+                    // ADD THIS: Report error if error member not found
+                    this.reportError(
+                        DiagCode.ERROR_MEMBER_NOT_FOUND,
+                        `Error member '${memberName}' not found in error set`,
+                        access.target.span
+                    );
+                    return null;
                 }
 
+                // Only report if we get here (neither enum nor errset matched)
                 this.reportError(
                     DiagCode.SYMBOL_NOT_FOUND,
-                    `${enumType.isErrset() ? 'Error set' : 'enum'} has no variant '${memberName}'`,
+                    `${enumType.isErrset() ? 'Error set' : 'Enum'} has no variant '${memberName}'`,
                     access.target.span
                 );
                 return null;
@@ -3420,13 +3858,13 @@
                 return null;
             }
 
-            private inferSwitchType(switchNode: AST.SwitchNode): AST.TypeNode | null {
-                this.inferExpressionType(switchNode.condExpr);
-                this.validateSwitchExhaustiveness(switchNode);
+            private inferSwitchType(MatchNode: AST.MatchNode): AST.TypeNode | null {
+                this.inferExpressionType(MatchNode.condExpr);
+                this.validateSwitchExhaustiveness(MatchNode);
 
                 const exprScope = this.config.services.scopeManager.findChildScopeByName('expr', ScopeKind.Expression);
 
-                for (const switchCase of switchNode.cases) {
+                for (const switchCase of MatchNode.cases) {
                     if (switchCase.expr) {
                         this.inferExpressionType(switchCase.expr);
                     }
@@ -3443,15 +3881,15 @@
                     }
                 }
 
-                if (switchNode.defCase) {
+                if (MatchNode.defCase) {
                     if (exprScope) {
                         this.config.services.contextTracker.withSavedState(() => {
                             this.config.services.scopeManager.withScope(exprScope.id, () => {
-                                this.validateStmt(switchNode.defCase!.stmt);
+                                this.validateStmt(MatchNode.defCase!.stmt);
                             });
                         });
                     } else {
-                        this.validateStmt(switchNode.defCase.stmt);
+                        this.validateStmt(MatchNode.defCase.stmt);
                     }
                 }
 
@@ -3471,6 +3909,7 @@
 
                 const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
                 if (symbol && symbol.type) {
+                    // RECURSIVELY resolve until we hit a non-identifier
                     return this.resolveIdentifierType(symbol.type);
                 }
 
@@ -3576,6 +4015,34 @@
                                         }
                                     } else if (!field.type && initType) {
                                         field.type = initType;
+                                    }
+
+                                    // NEW: Check if initializer is an enum variant that requires a value
+                                    if (field.initializer.is('Postfix')) {
+                                        const postfix = field.initializer.getPostfix();
+                                        if (postfix?.kind === 'MemberAccess') {
+                                            const access = postfix.getMemberAccess()!;
+                                            const baseType = this.inferExpressionType(access.base);
+
+                                            if (baseType) {
+                                                const resolvedBase = this.resolveIdentifierType(baseType);
+
+                                                if (resolvedBase.isEnum()) {
+                                                    const memberName = this.extractMemberName(access.target);
+                                                    const enumDef = resolvedBase.getEnum()!;
+                                                    const variant = enumDef.variants.find(v => v.ident.name === memberName);
+
+                                                    if (variant && variant.type) {
+                                                        this.reportError(
+                                                            DiagCode.TYPE_MISMATCH,
+                                                            `Enum variant '${memberName}' requires a value of type '${this.getTypeDisplayName(variant.type)}'. Use '${memberName}(value)' syntax.`,
+                                                            field.initializer.span
+                                                        );
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if (field.type) {
@@ -3767,8 +4234,8 @@
                 // SUCCESS: Size is valid
             }
 
-            private validateSwitchExhaustiveness(switchNode: AST.SwitchNode): void {
-                const condType = this.inferExpressionType(switchNode.condExpr);
+            private validateSwitchExhaustiveness(MatchNode: AST.MatchNode): void {
+                const condType = this.inferExpressionType(MatchNode.condExpr);
                 if (!condType) return;
 
                 // Resolve identifier types first
@@ -3786,7 +4253,7 @@
                     const enumType = resolvedType.getEnum()!;
                     const coveredVariants = new Set<string>();
 
-                    for (const switchCase of switchNode.cases) {
+                    for (const switchCase of MatchNode.cases) {
                         if (switchCase.expr) {
                             const variantName = this.extractEnumVariantName(switchCase.expr);
                             if (variantName) {
@@ -3796,7 +4263,7 @@
                     }
 
                     // Check exhaustiveness only if no default case
-                    if (!switchNode.defCase) {
+                    if (!MatchNode.defCase) {
                         const missingVariants: string[] = [];
                         for (const variant of enumType.variants) {
                             if (!coveredVariants.has(variant.ident.name)) {
@@ -3808,7 +4275,7 @@
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
                                 `Switch is not exhaustive. Missing variants: ${missingVariants.join(', ')}`,
-                                switchNode.span
+                                MatchNode.span
                             );
                         }
                     }
@@ -3816,14 +4283,14 @@
 
                 // Handle boolean exhaustiveness
                 if (resolvedType.isBool()) {
-                    const hasTrue = switchNode.cases.some((c: AST.CaseNode) => this.isBoolLiteral(c.expr, true));
-                    const hasFalse = switchNode.cases.some((c: AST.CaseNode) => this.isBoolLiteral(c.expr, false));
+                    const hasTrue = MatchNode.cases.some((c: AST.CaseNode) => this.isBoolLiteral(c.expr, true));
+                    const hasFalse = MatchNode.cases.some((c: AST.CaseNode) => this.isBoolLiteral(c.expr, false));
 
-                    if (!switchNode.defCase && (!hasTrue || !hasFalse)) {
+                    if (!MatchNode.defCase && (!hasTrue || !hasFalse)) {
                         this.reportError(
                             DiagCode.TYPE_MISMATCH,
-                            'Switch on boolean must handle both true and false cases or have a default',
-                            switchNode.span
+                            'Match on boolean must handle both true and false cases or have a default',
+                            MatchNode.span
                         );
                     }
                 }
@@ -4121,21 +4588,33 @@
                     // If types match exactly, continue with normal validation
                 }
 
-                // NORMALIZE BOTH TYPES FIRST - this handles all paren unwrapping
+                // STEP 1: NORMALIZE BOTH TYPES (unwrap parens, etc.)
                 const normalizedTarget = this.normalizeType(target);
                 const normalizedSource = this.normalizeType(source);
 
-                // any accepts everything
-                if (this.isAnyType(normalizedTarget)) return true;
+                // STEP 2: RESOLVE IDENTIFIERS EARLY (Point -> struct, slice -> []u8, etc.)
+                const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
+                const resolvedSource = this.resolveIdentifierType(normalizedSource);
 
-                // err accepts any error type or error member
-                if (normalizedTarget.isErr()) {
-                    if (this.isErrorType(normalizedSource)) {
+                // STEP 3: QUICK CHECKS
+
+                // 'any' accepts everything
+                if (this.isAnyType(resolvedTarget)) return true;
+
+                // Exact type match
+                if (this.isSameType(resolvedTarget, resolvedSource)) return true;
+
+                // STEP 4: ERROR TYPE HANDLING
+
+                // 'err' primitive accepts any error type
+                if (resolvedTarget.isErr()) {
+                    if (this.isErrorType(resolvedSource)) {
                         return true;
                     }
 
-                    if (normalizedSource.isIdent()) {
-                        const sourceIdent = normalizedSource.getIdent()!;
+                    // Check if source is an error identifier
+                    if (resolvedSource.isIdent()) {
+                        const sourceIdent = resolvedSource.getIdent()!;
                         const sourceSymbol = this.config.services.scopeManager.lookupSymbol(sourceIdent.name);
 
                         if (sourceSymbol && sourceSymbol.kind === SymbolKind.Error) {
@@ -4146,38 +4625,21 @@
                     return false;
                 }
 
-                if (this.isSameType(normalizedTarget, normalizedSource)) return true;
-
-                const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
-                const resolvedSource = this.resolveIdentifierType(normalizedSource);
-
-                if (this.isSameType(resolvedTarget, resolvedSource)) return true;
-
-                if (resolvedTarget.isErr()) {
-                    if (this.isErrorType(resolvedSource)) {
-                        return true;
-                    }
-
-                    if (resolvedSource.isIdent()) {
-                        const ident = resolvedSource.getIdent()!;
-                        const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
-                        if (symbol && symbol.kind === SymbolKind.Error) {
-                            return true;
-                        }
-                    }
-
-                    return false;
-                }
+                // STEP 5: NUMERIC TYPE HANDLING
 
                 // Bool is NOT compatible with numeric types
                 if (resolvedSource.isBool() && this.isNumericType(resolvedTarget)) {
                     return false;
                 }
 
+                // Numeric compatibility (i32 -> i64, comptime_int -> i32, etc.)
                 if (this.isNumericType(resolvedTarget) && this.isNumericType(resolvedSource)) {
                     return this.areNumericTypesCompatible(resolvedTarget, resolvedSource);
                 }
 
+                // STEP 6: UNION TYPE HANDLING
+
+                // Union to Union: all source types must be compatible with target union
                 if (resolvedTarget.isUnion() && resolvedSource.isUnion()) {
                     const targetUnion = resolvedTarget.getUnion()!;
                     const sourceUnion = resolvedSource.getUnion()!;
@@ -4189,40 +4651,96 @@
                     );
                 }
 
-                if (resolvedTarget.isOptional()) {
-                    if (resolvedSource.isNull() || resolvedSource.isUndefined()) return true;
-                    const targetInner = resolvedTarget.getOptional()!.target;
-                    return this.isTypeCompatible(targetInner, source);
-                }
-
-                if (resolvedTarget.isArray() && resolvedSource.isArray()) {
-                    return this.areArrayTypesCompatible(resolvedTarget, resolvedSource);
-                }
-
-                if (resolvedTarget.isPointer()) {
-                    if (resolvedSource.isNull()) return true;
-                    if (resolvedSource.isPointer()) {
-                        return this.arePointerTypesCompatible(resolvedTarget, resolvedSource);
-                    }
-                }
-
-                if (resolvedTarget.isTuple() && resolvedSource.isTuple()) {
-                    return this.areTupleTypesCompatible(resolvedTarget, resolvedSource);
-                }
-
-                if (resolvedTarget.isStruct() && resolvedSource.isStruct()) {
-                    return this.areStructTypesCompatible(resolvedTarget, resolvedSource);
-                }
-
-                if (resolvedTarget.isEnum() && resolvedSource.isEnum()) {
-                    return this.isSameType(resolvedTarget, resolvedSource);
-                }
-
+                // Target is Union: check if source matches ANY union member
                 if (resolvedTarget.isUnion()) {
                     const unionType = resolvedTarget.getUnion()!;
-                    return unionType.types.some((type: AST.TypeNode) => this.isTypeCompatible(type, source));
+
+                    // PRIORITY 1: Check NORMALIZED source identifier (BEFORE resolution)
+                    if (normalizedSource.isIdent()) {
+                        const sourceIdent = normalizedSource.getIdent()!;
+
+                        const identMatch = unionType.types.some((memberType: AST.TypeNode, idx: number) => {
+                            if (memberType.isIdent()) {
+                                const match = memberType.getIdent()!.name === sourceIdent.name;
+                                return match;
+                            }
+                            return false;
+                        });
+
+                        if (identMatch) {
+                            return true;
+                        }
+                    }
+
+                    // PRIORITY 2: Check if RESOLVED source is a named struct
+                    if (resolvedSource.isStruct()) {
+                        const struct = resolvedSource.getStruct()!;
+
+                        if (struct.name && struct.name !== 'Anonymous') {
+                            const structNameMatch = unionType.types.some((memberType: AST.TypeNode, idx: number) => {
+                                if (memberType.isIdent()) {
+                                    const match = memberType.getIdent()!.name === struct.name;
+                                    return match;
+                                }
+                                return false;
+                            });
+
+                            if (structNameMatch) {
+                                return true;
+                            }
+                        }
+                    }
+
+                    // PRIORITY 3: Check RESOLVED source for structural matches
+                    const structuralMatch = unionType.types.some((memberType: AST.TypeNode, idx: number) => {
+
+                        // Resolve the union member type
+                        const resolvedMember = this.resolveIdentifierType(memberType);
+
+                        // For struct types, use specialized structural comparison
+                        if (resolvedMember.isStruct() && resolvedSource.isStruct()) {
+                            const result = this.areStructsStructurallyCompatible(
+                                resolvedMember.getStruct()!,
+                                resolvedSource.getStruct()!
+                            );
+                            return result;
+                        }
+
+                        // For array types, use specialized array comparison
+                        if (resolvedMember.isArray() && resolvedSource.isArray()) {
+                            const result = this.areArrayTypesCompatible(resolvedMember, resolvedSource);
+                            return result;
+                        }
+
+                        // For other types, recursively check compatibility
+                        const result = this.isTypeCompatible(resolvedMember, normalizedSource);
+                        return result;
+                    });
+
+                    return structuralMatch;
                 }
 
+                // Source is Union: check if ALL source types are compatible with target
+                // This handles cases like: let x: i32 = (1 | 2); // union value to single type
+                if (resolvedSource.isUnion()) {
+                    const sourceUnion = resolvedSource.getUnion()!;
+
+                    return sourceUnion.types.every((sourceType: AST.TypeNode) =>
+                        this.isTypeCompatible(resolvedTarget, sourceType)
+                    );
+                }
+
+                // STEP 7: OPTIONAL TYPE HANDLING
+
+                // Target is optional: accept null/undefined OR unwrapped type
+                if (resolvedTarget.isOptional()) {
+                    if (resolvedSource.isNull() || resolvedSource.isUndefined()) return true;
+
+                    const targetInner = resolvedTarget.getOptional()!.target;
+                    return this.isTypeCompatible(targetInner, resolvedSource);
+                }
+
+                // Source is optional: for union targets, check if inner type + null are both compatible
                 if (resolvedSource.isOptional()) {
                     const sourceInner = resolvedSource.getOptional()!.target;
 
@@ -4234,8 +4752,55 @@
                         const hasNull = unionType.types.some((t: AST.TypeNode) => t.isNull());
                         return hasInnerType && hasNull;
                     }
+
+                    // For non-union targets, optional source is not compatible
+                    return false;
                 }
 
+                // STEP 8: ARRAY TYPE HANDLING
+
+                if (resolvedTarget.isArray() && resolvedSource.isArray()) {
+                    return this.areArrayTypesCompatible(resolvedTarget, resolvedSource);
+                }
+
+                // STEP 9: POINTER TYPE HANDLING
+
+                if (resolvedTarget.isPointer()) {
+                    if (resolvedSource.isNull()) return true;
+
+                    if (resolvedSource.isPointer()) {
+                        return this.arePointerTypesCompatible(resolvedTarget, resolvedSource);
+                    }
+
+                    return false;
+                }
+
+                // STEP 10: TUPLE TYPE HANDLING
+
+                if (resolvedTarget.isTuple() && resolvedSource.isTuple()) {
+                    return this.areTupleTypesCompatible(resolvedTarget, resolvedSource);
+                }
+
+                // STEP 11: STRUCT TYPE HANDLING
+
+                if (resolvedTarget.isStruct() && resolvedSource.isStruct()) {
+                    return this.areStructTypesCompatible(resolvedTarget, resolvedSource);
+                }
+
+                // STEP 12: ENUM TYPE HANDLING
+
+                if (resolvedTarget.isEnum() && resolvedSource.isEnum()) {
+                    return this.isSameType(resolvedTarget, resolvedSource);
+                }
+
+                // STEP 13: TYPE PRIMITIVE HANDLING
+
+                // 'type' is a special meta-type
+                if (resolvedTarget.isType()) {
+                    return true;
+                }
+
+                // STEP 14: NO MATCH
                 return false;
             }
 
@@ -4476,8 +5041,31 @@
             }
 
             private areStructTypesCompatible(target: AST.TypeNode, source: AST.TypeNode): boolean {
-                const targetStruct = target.getStruct()!;
-                const sourceStruct = source.getStruct()!;
+                // NEW: Resolve identifiers first
+                let resolvedTarget = target;
+                let resolvedSource = source;
+
+                if (target.isIdent()) {
+                    const resolved = this.resolveIdentifierType(target);
+                    if (resolved.isStruct()) {
+                        resolvedTarget = resolved;
+                    }
+                }
+
+                if (source.isIdent()) {
+                    const resolved = this.resolveIdentifierType(source);
+                    if (resolved.isStruct()) {
+                        resolvedSource = resolved;
+                    }
+                }
+
+                // Now check if both are structs after resolution
+                if (!resolvedTarget.isStruct() || !resolvedSource.isStruct()) {
+                    return false;
+                }
+
+                const targetStruct = resolvedTarget.getStruct()!;
+                const sourceStruct = resolvedSource.getStruct()!;
 
                 if (targetStruct.metadata?.scopeId !== undefined &&
                     sourceStruct.metadata?.scopeId !== undefined) {
@@ -4501,18 +5089,24 @@
 
                 for (const member of target.members) {
                     if (member.isField()) {
-                        const field = member.source as AST.FieldNode;
+                        const field = member.getField()!;
                         targetFields.set(field.ident.name, field);
                     }
                 }
 
                 for (const member of source.members) {
                     if (member.isField()) {
-                        const field = member.source as AST.FieldNode;
+                        const field = member.getField()!;
                         sourceFields.set(field.ident.name, field);
                     }
                 }
 
+                // Check size first
+                if (targetFields.size !== sourceFields.size) {
+                    return false;
+                }
+
+                // Check each field
                 for (const [fieldName, targetField] of targetFields) {
                     const sourceField = sourceFields.get(fieldName);
 
@@ -4520,10 +5114,15 @@
                         return false;
                     }
 
-                    if (targetField.type && sourceField.type) {
-                        if (!this.isTypeCompatible(targetField.type, sourceField.type)) {
-                            return false;
-                        }
+                    // CRITICAL FIX: Both fields must have types
+                    if (!targetField.type || !sourceField.type) {
+                        return false;
+                    }
+
+                    // CRITICAL FIX: Use isTypeCompatible, not isSameType
+                    // This allows i32 to match comptime_int, etc.
+                    if (!this.isTypeCompatible(targetField.type, sourceField.type)) {
+                        return false;
                     }
                 }
 
@@ -4769,7 +5368,7 @@
                     case 'Try':
                     case 'Catch':
                     case 'If':
-                    case 'Switch':
+                    case 'Match':
                     case 'Typeof':
                     case 'Sizeof':
                         return null;
@@ -4801,12 +5400,6 @@
                 return null;
             }
 
-            /**
-             * Normalizes a type by unwrapping all parentheses while preserving
-             * the original type for span-based error reporting.
-             *
-             * This ensures type comparisons work correctly regardless of parenthesization.
-             */
             private normalizeType(type: AST.TypeNode): AST.TypeNode {
                 // Unwrap all paren layers
                 while (type.isParen()) {
@@ -5060,6 +5653,11 @@
 
                 // Resolve identifier types first
                 const resolved = this.resolveIdentifierType(type);
+
+                // NEW: Handle slice type alias specially
+                if (this.isStringType(resolved)) {
+                    return 'slice';
+                }
 
                 // Check for struct with a name
                 if (resolved.isStruct()) {

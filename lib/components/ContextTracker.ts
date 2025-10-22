@@ -42,7 +42,7 @@
     export interface DeclarationContext {
         symbolName              : string;
         symbolId                : SymbolId;
-        symbolKind              : SymbolKind;
+        symbolKind              : ContextSymbolKind;
         phase                   : DeclarationPhase;
         span                    : AST.Span;
         parentScope             : ScopeId;
@@ -76,7 +76,7 @@
         FinalValidation         = 'FinalValidation'
     }
 
-    export type SymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
+    export type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
 
     export interface SavedContextState {
         scopeId                 : ScopeId;
@@ -315,7 +315,7 @@
             startDeclaration(
                 symbolName: string,
                 symbolId: SymbolId,
-                symbolKind: SymbolKind | 'Use',
+                symbolKind: ContextSymbolKind | 'Use',
                 span: AST.Span,
                 parentScope: ScopeId
             ): void {
@@ -559,7 +559,7 @@
                 return current ? current.symbolName : undefined;
             }
 
-            getCurrentDeclarationSymbolKind(): SymbolKind | undefined {
+            getCurrentDeclarationSymbolKind(): ContextSymbolKind | undefined {
                 const current = this.getCurrentDeclaration();
                 return current ? current.symbolKind : undefined;
             }

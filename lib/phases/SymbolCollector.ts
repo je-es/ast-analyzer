@@ -1233,7 +1233,7 @@
 
                 switch (expr.kind) {
                     case 'If':
-                    case 'Switch':
+                    case 'Match':
                     case 'Try':
                     case 'Catch':
                         needsScope = true;
@@ -1277,8 +1277,8 @@
                     case 'If':
                         this.handleIfExpr(expr.getIf()!, scope, moduleName);
                         break;
-                    case 'Switch':
-                        this.handleSwitchExpr(expr.getSwitch()!, scope, moduleName);
+                    case 'Match':
+                        this.handleSwitchExpr(expr.getMatch()!, scope, moduleName);
                         break;
                     case 'Binary':
                         this.handleBinaryExpr(expr.getBinary()!, scope, moduleName);
@@ -1327,7 +1327,7 @@
                 }
             }
 
-            private handleSwitchExpr(switchExpr: AST.SwitchNode, scope: Scope, moduleName: string): void {
+            private handleSwitchExpr(switchExpr: AST.MatchNode, scope: Scope, moduleName: string): void {
                 this.collectExpr(switchExpr.condExpr, scope, moduleName);
                 for (const switchCase of switchExpr.cases) {
                     if (switchCase.expr) this.collectExpr(switchCase.expr, scope, moduleName);
@@ -1435,7 +1435,7 @@
                         if (parentScope?.kind === ScopeKind.Type &&
                             parentScope.metadata?.typeKind === 'Struct') {
                             structScope = parentScope;
-                            
+
                             const funcSymbol = parentScope.symbols.get(checkScope.name);
                             if (funcSymbol && funcSymbol.visibility.kind === 'Static') {
                                 isInStaticMethod = true;
@@ -1632,6 +1632,10 @@
                         continue;
                     }
 
+                    // ALWAYS collect the variant symbol in the enum scope
+                    this.collectEnumVariantIdent(variant.ident, typeScope, moduleName);
+
+                    // THEN handle the associated type if it exists
                     if(variant.type) {
                         const variantScope = this.createTypeScope(variant.ident.name, typeScope);
                         if (variant.type.isStruct()) {
@@ -1650,9 +1654,6 @@
                         } else {
                             this.collectType(variant.type, typeScope, moduleName);
                         }
-                    } else {
-                        // Simple variant - NO SCOPE NEEDED
-                        this.collectEnumVariantIdent(variant.ident, typeScope, moduleName);
                     }
                 }
             }
@@ -1694,7 +1695,25 @@
 
             private handleUnionType(unionType: AST.UnionTypeNode, parentScope: Scope, moduleName: string): void {
                 for (const variant of unionType.types) {
-                    this.collectType(variant, parentScope, moduleName);
+                    // CRITICAL FIX: Create isolated scope for each union member
+                    if (variant.isStruct()) {
+                        const anonId = this.config.services.scopeManager.symbolIdGenerator.next();
+                        const scopeName = `<union-struct-${anonId}>`;
+                        const structScope = this.createTypeScope(scopeName, parentScope, 'Struct');
+                        
+                        const struct = variant.getStruct()!;
+                        struct.metadata = { ...struct.metadata, scopeId: structScope.id };
+                        
+                        this.config.services.scopeManager.withScope(structScope.id, () => {
+                            this.config.services.contextTracker.withSavedState(() => {
+                                this.config.services.contextTracker.setScope(structScope.id);
+                                this.handleStructType(struct, structScope, moduleName);
+                            });
+                        });
+                    } else {
+                        // For non-struct types, collect normally BUT in isolation
+                        this.collectType(variant, parentScope, moduleName);
+                    }
                 }
             }
 

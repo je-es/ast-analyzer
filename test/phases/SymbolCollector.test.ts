@@ -898,10 +898,10 @@
             },
         ],
 
-        SwitchMustFails: [
-            // VARIABLE_SHADOWING in switch case
+        MatchMustFails: [
+            // VARIABLE_SHADOWING in match case
             {
-                input       : 'fn f() { switch (x) { case 1: { let y = 1; let y = 2; } } }',
+                input       : 'fn f() { match (x) { 1 => { let y = 1; let y = 2; } } }',
                 success     : false,
                 diagnostics : [
                     {
@@ -916,21 +916,21 @@
         SwitchMustSucceed: [
             // Basic switch
             {
-                input       : 'fn f(x: i32) { switch (x) { case 1: { let y = 1; } case 2: { let z = 2; } } }',
+                input       : 'fn f(x: i32) { match (x) { 1 => { let y = 1; } 2 => { let z = 2; } } }',
                 success     : true,
                 diagnostics : [],
             },
 
             // Switch with default case
             {
-                input       : 'fn f(x: i32) { switch (x) { case 1: { let y = 1; } default: { let z = 0; } } }',
+                input       : 'fn f(x: i32) { match (x) { 1 => { let y = 1; } default => { let z = 0; } } }',
                 success     : true,
                 diagnostics : [],
             },
 
             // Same variable in different cases
             {
-                input       : 'fn f(x: i32) { switch (x) { case 1: { let y = 1; } case 2: { let y = 2; } } }',
+                input       : 'fn f(x: i32) { match (x) { 1 => { let y = 1; } 2 => { let y = 2; } } }',
                 success     : true,
                 diagnostics : [],
             },
@@ -2113,9 +2113,9 @@
                     def Point = struct {
                         x: i32;
                         fn classify() -> i32 {
-                            switch (self.x) {
-                                case 0: { return 0; }
-                                default: { return 1; }
+                            match (self.x) {
+                                0 => { return 0; }
+                                default => { return 1; }
                             }
                         }
                     }

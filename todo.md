@@ -2,29 +2,19 @@
 
     ...
 
-    - add : `cpoint` alias, refers to `u21`.
+    - add : array type length member, e.g. `let name = "Maysara"; let len = name.len;`
 
-    - add : `isize` alias, refers to `i64`.
+    - add : tuple type length member and member access via array syntax, e.g. `let t = . { x,y,z };` then `t.len` and `t[0]`.
 
-    - add : `usize` alias, refers to `u64`.
+    - add : slice concatenation, e.g. `let name = "Maysara"; let greeting = "Hello" + " " + name;`
 
-    - fix : `str` should be `slice`.
+    - add : slice by range, e.g. `let name = "Maysara"; let my_slice = name[0..1]; // "Ma"`
 
-    - fix : `''` must be more smart to handle/accept `char(u8)` and `cpoint(u21)`.
+    - fix : type `type` must accept any type.
 
-    - fix : improve error types and throw mechanism.
+    - change : `switch` to `match` and `case x :` to `x =>`
 
-    - fix : in function symbol metadata, add error type mode.
-
-    - add : `selferr`
-
-    - fix : [BUG] "TYPE_MISMATCH" "Float literals not allowed in integer-only context" in `let opt_float: ?f32 = 3.14;`
-
-    - fix : [BUG] comptime handling, example: `comptime fn get_size() -> i32 { return 10; } let arr: [get_size()]i32;`
-
-    - fix : [BUG] static must be immutable
-
-    - a lot of bugs related to : `static`, `mut`, `optional`, `pointers`, `diag manager filter`, ... fixed.
+    - fix : `union`/`struct`/`enum`/`fn` types.
 
 - # Current
 

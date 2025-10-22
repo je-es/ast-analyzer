@@ -877,7 +877,7 @@
             // Switch expression
             {
                 name: 'Switch expression',
-                input: 'fn T_ST(x: i32) { switch (x) { case 1: { let a = 1; } case 2: { let b = 2; } } }',
+                input: 'fn T_ST(x: i32) { match (x) { 1 => { let a = 1; } 2 => { let b = 2; } } }',
                 success: true,
                 diagnostics: [],
             },
