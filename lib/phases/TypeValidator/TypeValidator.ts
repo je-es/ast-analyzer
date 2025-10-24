@@ -888,6 +888,8 @@
 
                 this.config.services.contextTracker.withSavedState(() => {
                     this.config.services.scopeManager.withScope(loopScope.id, () => {
+                        this.config.services.contextTracker.enterLoop();
+
                         if (loopStmt.expr) {
                             const condType = this.typeInference.inferExpressionType(loopStmt.expr);
 
@@ -900,6 +902,8 @@
                             this.validateStmt(loopStmt.stmt);
                         }
                     });
+                    
+                    this.config.services.contextTracker.exitLoop();
                 });
             }
 
@@ -1815,6 +1819,11 @@
 
                 const func = funcType.getFunction()!;
 
+                // Special handling for @i function
+                if (builtinName === '@i') {
+                    return this.validateLoopIndexCall(call, builtinSymbol);
+                }
+
                 // Check argument count
                 if (func.params.length !== call.args.length) {
                     const code = func.params.length > call.args.length
@@ -1847,6 +1856,94 @@
                 }
 
                 return func.returnType || AST.TypeNode.asVoid(call.span);
+            }
+
+            validateLoopIndexCall(call: AST.CallNode, builtinSymbol: Symbol): AST.TypeNode | null {
+                // Check if we're inside a loop
+                if (!this.config.services.contextTracker.isInLoop()) {
+                    this.reportError(
+                        DiagCode.INVALID_BUILTIN_USAGE,
+                        "Builtin '@i' can only be used inside a loop context",
+                        call.base.span
+                    );
+                    return AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                }
+
+                const func = builtinSymbol.type!.getFunction()!;
+                const currentLoopDepth = this.config.services.contextTracker.getLoopDepth();
+
+                // Handle no arguments (default to 0)
+                if (call.args.length === 0) {
+                    return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                }
+
+                // Handle one argument
+                if (call.args.length === 1) {
+                    const arg = call.args[0];
+                    const argType = this.typeInference.inferExpressionType(arg);
+
+                    if (!argType) {
+                        return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                    }
+
+                    // Check for negative integers first (before type compatibility check)
+                    const argValue = this.evaluateConstantExpression(arg);
+                    if (argValue !== null && typeof argValue === 'number' && argValue < 0) {
+                        this.reportError(
+                            DiagCode.INDEX_OUT_OF_BOUNDS,
+                            "Loop index must be non-negative, got " + argValue,
+                            arg.span
+                        );
+                        return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                    }
+
+                    // Check if argument is compatible with usize
+                    if (!this.typeInference.isTypeCompatible(func.params[0], argType)) {
+                        this.reportError(
+                            DiagCode.TYPE_MISMATCH,
+                            `Argument type '${this.typeInference.getTypeDisplayName(argType)}' is not compatible with parameter type '${this.typeInference.getTypeDisplayName(func.params[0])}'`,
+                            arg.span
+                        );
+                        return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                    }
+
+                    // Check bounds for positive values
+                    if (argValue !== null && typeof argValue === 'number' && argValue >= currentLoopDepth) {
+                        this.reportError(
+                            DiagCode.INDEX_OUT_OF_BOUNDS,
+                            `Loop index ${argValue} is out of bounds (current loop depth: ${currentLoopDepth})`,
+                            arg.span
+                        );
+                    }
+
+                    return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+                }
+
+                // Too many arguments
+                this.reportError(
+                    DiagCode.TOO_MANY_ARGUMENTS,
+                    `Builtin '@i' expects at most 1 argument, but got ${call.args.length}`,
+                    call.args.length > 1 ? { start: call.args[1].span.start, end: call.args[call.args.length-1].span.end } : call.span
+                );
+
+                return func.returnType || AST.TypeNode.asUnsigned(call.span, 'usize', 64);
+            }
+
+            evaluateConstantExpression(expr: AST.ExprNode): number | null {
+                if (expr.is('Primary')) {
+                    const primary = expr.getPrimary();
+                    if (primary?.is('Literal')) {
+                        const literal = primary.getLiteral();
+                        if (literal?.kind === 'Integer') {
+                            try {
+                                return parseInt(literal.value as string, 10);
+                            } catch {
+                                return null;
+                            }
+                        }
+                    }
+                }
+                return null;
             }
 
             validateStructMethodCall(

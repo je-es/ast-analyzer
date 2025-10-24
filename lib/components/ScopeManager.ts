@@ -448,6 +448,17 @@
                     ], AST.TypeNode.asVoid({start: 0, end: 0})),
                     callable: true
                 });
+                this.createBuiltinSymbol(SymbolKind.Function, '@i', {
+                    type: AST.TypeNode.asFunction({start: 0, end: 0}, [
+                            AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)
+                    ], AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)),
+                    callable: true,
+                    metadata: {
+                        isLoopIndexFunction: true,
+                        hasOptionalParameter: true,
+                        defaultParameterValue: 0
+                    }
+                });
 
                 // Types
                 this.createBuiltinSymbol(SymbolKind.Definition, 'slice', {
@@ -470,7 +481,7 @@
             private createBuiltinSymbol(
                 kind: SymbolKind,
                 name: string,
-                options: { type: AST.TypeNode | null; callable?: boolean }
+                options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
             ): Symbol {
                 const symbol: Symbol = {
                     id: this.symbolIdGenerator.next(),
@@ -488,7 +499,8 @@
                     isExported: false,
                     metadata: {
                         callable: options.callable || false,
-                        isBuiltin: true
+                        isBuiltin: true,
+                        ...options.metadata
                     }
                 };
 

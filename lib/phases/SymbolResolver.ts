@@ -1209,25 +1209,29 @@
             private resolveLoopStmt(loopStmt: AST.LoopStmtNode): void {
                 this.log('symbols', 'Resolving loop statement');
 
-                const loopScope = this.config.services.scopeManager.findChildScopeByName('loop', ScopeKind.Loop);
-                if (loopScope) {
-                    this.config.services.contextTracker.withSavedState(() => {
-                        this.config.services.contextTracker.setScope(loopScope.id);
+                // Create a new loop scope for this specific loop statement
+                const currentScope = this.config.services.scopeManager.getCurrentScope();
+                const loopScope = this.config.services.scopeManager.createScope(ScopeKind.Loop, 'loop', currentScope.id);
+                
+                this.config.services.contextTracker.withSavedState(() => {
+                    this.config.services.contextTracker.setScope(loopScope.id);
+                    this.config.services.contextTracker.enterLoop();
 
-                        this.config.services.scopeManager.withScope(loopScope.id, () => {
-                            if (loopStmt.kind === 'While') {
-                                if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-                                if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-                            } else if (loopStmt.kind === 'Do') {
-                                if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-                                if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-                            } else if (loopStmt.kind === 'For') {
-                                if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-                                if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-                            }
-                        });
+                    this.config.services.scopeManager.withScope(loopScope.id, () => {
+                        if (loopStmt.kind === 'While') {
+                            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+                            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+                        } else if (loopStmt.kind === 'Do') {
+                            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+                            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+                        } else if (loopStmt.kind === 'For') {
+                            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+                            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+                        }
                     });
-                }
+                });
+                
+                this.config.services.contextTracker.exitLoop();
             }
 
         // └──────────────────────────────────────────────────────────────────────┘

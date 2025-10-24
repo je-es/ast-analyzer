@@ -2,16 +2,18 @@
 
     ...
 
-    - fix : default arg must be not required.
-
-    - improvement: split `Type Validator.ts` into smaller modules.
+    - add : `@i(level)` built-in function.
 
 - # Current
+
+    - add : `unreachable` expression.
+
+    - add : `noreturn` type.
+
+    - add : `@assert` built-in function.
 
 - # Later
 
     - add `bench` stmt (builtin-benchmark-framework).
 
     - add `std` lib.
-
-    - complete meta/builtin `@..`, e.g. `@i(level)`.

@@ -1134,6 +1134,7 @@
                 this.config.services.scopeManager.withScope(loopScope.id, () => {
                     this.config.services.contextTracker.withSavedState(() => {
                         this.config.services.contextTracker.setScope(loopScope.id);
+                        this.config.services.contextTracker.enterLoop();
 
                         switch (loopNode.kind) {
                             case 'While':
@@ -1150,6 +1151,8 @@
                                 break;
                         }
                     });
+                    
+                    this.config.services.contextTracker.exitLoop();
                 });
             }
 

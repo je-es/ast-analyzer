@@ -3384,28 +3384,107 @@
         ]
     };
 
+    const LoopIndexCases = {
+        temp: [
+            {
+                input: `
+                // TODO: we must add to analyzer: when see builtin @i, we must check if it is in loop,
+                //       then, we must check for the loop index if exists
+                //       also, we must check if no parameter is passed to @i, so its default value is 0
+
+                for(0..5) { let x1 = @i(); } // default value is zero (current loop)
+                for(0..5) { let x2 = @i(0); }
+                for(0..5) { for(0..5) { let x3 = @i(1); } } // OK
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            {
+                input: `for(0..5) { let x = @i(1); } // Error, you try to access to higher index which is unexists ! `,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Loop index 1 is out of bounds (current loop depth: 1)",
+                        kind: 'error',
+                        code: "INDEX_OUT_OF_BOUNDS",
+                        tspan: { start: 23, end: 24 },
+                    }
+                ]
+            },
+
+            {
+                input: `let x = @i(); // Error, @i used outside of loop`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Builtin '@i' can only be used inside a loop context",
+                        kind: 'error',
+                        code: "INVALID_BUILTIN_USAGE",
+                        tspan: { start: 8, end: 10 },
+                    }
+                ]
+            },
+
+            {
+                input: `let x = @i(0); // Error, @i used outside of loop with parameter`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Builtin '@i' can only be used inside a loop context",
+                        kind: 'error',
+                        code: "INVALID_BUILTIN_USAGE",
+                        tspan: { start: 8, end: 10 },
+                    }
+                ]
+            },
+
+            {
+                input: `for(0..5) { let x = @i(-1); } // Error, negative index`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Argument type 'cint' is not compatible with parameter type 'u64'",
+                        kind: 'error',
+                        code: "TYPE_MISMATCH",
+                        tspan: { start: 23, end: 25 },
+                    }
+                ]
+            },
+        ]
+    }
+
+    // unreachable is primary expression
+    // noreturn is primitive type
+    // unreachble must infered as noreturn type
+    
+    // TODO: Add tests for unreachable expression
+    const UnreachableExpressionCases = {
+        UnreachableExpressionCasesMustFail: [
+            {
+                input: `let x = unreachable;`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                        tspan: { start: 8, end: 16 },
+                    }
+                ]
+            },
+
+            // ...
+        ]
+    }
+
+    // TODO: Add tests for noreturn
+
+    // TODO: we also need to improve our system to detect unreachable code in other contexts, e.g. after code after 100% return statement.
+
     const temp = {
         temp: [
-            // {
-            //     input: `
-            //     def Point = struct { x: i32; y: i32 };
-            //     def DataValue = i32 | [5]u8 | Point;
-            //     let mut data : DataValue = [1, 2, 3, 4, 5];
-            //     data = new Point { x: 10, y: 5 }; // [FIXED] BUG: Cannot assign type 'Point' to 'DataValue'kls(TYPE_MISMATCH)
-            //     `,
-            //     success: true,
-            //     diagnostics: []
-            // },
 
-            // {
-            //     input: `
-            //     def DataValue = i32 | [5]u8 | struct { x: i32; y: i32 };
-            //     let mut data : DataValue = [1, 2, 3, 4, 5];
-            //     data = { x: 10, y: 5 }; // [FIXED] BUG: Cannot assign type 'Point' to 'DataValue'kls(TYPE_MISMATCH)
-            //     `,
-            //     success: true,
-            //     diagnostics: []
-            // },
         ]
     }
 
@@ -3416,13 +3495,14 @@
 // ╔════════════════════════════════════════ T_ST ════════════════════════════════════════╗
 
     testAnalyzer({
-        ...UTF8_ASCII_ExtendedCases,
-        ...ErrorModesExtendedCases,
-        ...OptionalTypesExtendedCases,
-        ...PointerTypesExtendedCases,
-        ...ComptimeExtendedCases,
-        ...SliceTypeExtendedCases,
-        // ...temp
+        // ...UTF8_ASCII_ExtendedCases,
+        // ...ErrorModesExtendedCases,
+        // ...OptionalTypesExtendedCases,
+        // ...PointerTypesExtendedCases,
+        // ...ComptimeExtendedCases,
+        // ...SliceTypeExtendedCases,
+        // ...LoopIndexCases,
+        ...UnreachableExpressionCases
 
     }, AnalysisPhase.TypeValidation);
 

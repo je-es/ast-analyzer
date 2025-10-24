@@ -140,6 +140,10 @@
         // Comptime - MORE SPECIFIC
         COMPTIME_EVAL_FAILED        = 'COMPTIME_EVAL_FAILED',          // Comptime evaluation failed
         COMPTIME_NON_CONST          = 'COMPTIME_NON_CONST',            // Non-const in comptime context
+
+        // Builtin validation
+        INVALID_BUILTIN_USAGE       = 'INVALID_BUILTIN_USAGE',         // Builtin used in wrong context
+        INDEX_OUT_OF_BOUNDS         = 'INDEX_OUT_OF_BOUNDS',           // Index out of bounds error
     }
 
     export enum DiagKind {

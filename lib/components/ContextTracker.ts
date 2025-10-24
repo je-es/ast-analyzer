@@ -66,6 +66,7 @@
         processingSymbols       : Set<SymbolId>;
         pendingReferences       : Map<string, AST.Span[]>;
         resolvedSymbols         : Set<SymbolId>;
+        loopDepth               : number;
     }
 
     export enum AnalysisPhase {
@@ -85,6 +86,7 @@
         spanStackDepth          : number;
         declarationStackDepth   : number;
         expressionStackDepth    : number;
+        loopDepth               : number;
     }
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
@@ -139,7 +141,8 @@
                     currentScope        : 0,
                     processingSymbols   : new Set(),
                     pendingReferences   : new Map(),
-                    resolvedSymbols     : new Set()
+                    resolvedSymbols     : new Set(),
+                    loopDepth           : 0
                 };
             }
 
@@ -155,7 +158,8 @@
                     modulePath              : this.context.currentModulePath,
                     spanStackDepth          : this.context.contextSpanStack.length,
                     declarationStackDepth   : this.context.declarationStack.length,
-                    expressionStackDepth    : this.context.expressionStack.length
+                    expressionStackDepth    : this.context.expressionStack.length,
+                    loopDepth               : this.context.loopDepth
                 };
 
                 this.debugManager?.log('verbose',
@@ -183,6 +187,9 @@
                 // Restore module info
                 this.context.currentModuleName = state.moduleName;
                 this.context.currentModulePath = state.modulePath;
+
+                // Restore loop depth
+                this.context.loopDepth = state.loopDepth;
 
                 // Restore stack depths with overflow protection
                 this.restoreStack(this.context.contextSpanStack, state.spanStackDepth, 'contextSpan');
@@ -488,6 +495,33 @@
                 }
 
                 return { isForwardReference: false };
+            }
+
+        // └────────────────────────────────────────────────────────────────────┘
+
+
+        // ┌──────────────────────────── LOOP TRACKING ──────────────────────────┐
+
+            enterLoop(): void {
+                this.context.loopDepth++;
+                this.debugManager?.log('verbose', `Context: Entered loop (depth: ${this.context.loopDepth})`);
+            }
+
+            exitLoop(): void {
+                if (this.context.loopDepth > 0) {
+                    this.context.loopDepth--;
+                    this.debugManager?.log('verbose', `Context: Exited loop (depth: ${this.context.loopDepth})`);
+                } else {
+                    this.debugManager?.log('errors', `Context: Attempted to exit loop when not in any loop`);
+                }
+            }
+
+            getLoopDepth(): number {
+                return this.context.loopDepth;
+            }
+
+            isInLoop(): boolean {
+                return this.context.loopDepth > 0;
             }
 
         // └────────────────────────────────────────────────────────────────────┘

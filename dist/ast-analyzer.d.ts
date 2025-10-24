@@ -267,6 +267,7 @@ interface AnalysisContext {
     processingSymbols: Set<SymbolId>;
     pendingReferences: Map<string, AST.Span[]>;
     resolvedSymbols: Set<SymbolId>;
+    loopDepth: number;
 }
 declare enum AnalysisPhase {
     Collection = "Collection",
@@ -283,6 +284,7 @@ interface SavedContextState {
     spanStackDepth: number;
     declarationStackDepth: number;
     expressionStackDepth: number;
+    loopDepth: number;
 }
 declare class ContextTracker {
     private debugManager?;
@@ -337,6 +339,10 @@ declare class ContextTracker {
         isForwardReference: boolean;
         referencedParameterIndex?: number;
     };
+    enterLoop(): void;
+    exitLoop(): void;
+    getLoopDepth(): number;
+    isInLoop(): boolean;
     getContextSpan(): AST.Span | undefined;
     getContext(): Readonly<AnalysisContext>;
     getPhase(): string;
@@ -460,7 +466,9 @@ declare enum DiagCode {
     POTENTIAL_PRECISION_LOSS = "POTENTIAL_PRECISION_LOSS",
     POTENTIAL_DATA_LOSS = "POTENTIAL_DATA_LOSS",
     COMPTIME_EVAL_FAILED = "COMPTIME_EVAL_FAILED",// Comptime evaluation failed
-    COMPTIME_NON_CONST = "COMPTIME_NON_CONST"
+    COMPTIME_NON_CONST = "COMPTIME_NON_CONST",// Non-const in comptime context
+    INVALID_BUILTIN_USAGE = "INVALID_BUILTIN_USAGE",// Builtin used in wrong context
+    INDEX_OUT_OF_BOUNDS = "INDEX_OUT_OF_BOUNDS"
 }
 declare enum DiagKind {
     ERROR = "error",
@@ -937,6 +945,8 @@ declare class TypeValidator extends PhaseBase {
     validateEnumVariantConstruction(call: AST.CallNode, access: AST.MemberAccessNode, enumType: AST.TypeNode): AST.TypeNode | null;
     validateMemberVisibility(memberSymbol: Symbol, structScope: Scope, accessSpan: AST.Span): void;
     validateBuiltinCall(call: AST.CallNode): AST.TypeNode | null;
+    validateLoopIndexCall(call: AST.CallNode, builtinSymbol: Symbol): AST.TypeNode | null;
+    evaluateConstantExpression(expr: AST.ExprNode): number | null;
     validateStructMethodCall(call: AST.CallNode, access: AST.MemberAccessNode, structType: AST.TypeNode): AST.TypeNode | null;
     validateCallArgumentsWithContext(call: AST.CallNode, funcType: AST.TypeNode): AST.TypeNode | null;
     validateMethodCall(call: AST.CallNode, methodSymbol: Symbol, structScope: Scope, baseExpr: AST.ExprNode): AST.TypeNode | null;

@@ -118,6 +118,8 @@ var DiagCode = /* @__PURE__ */ ((DiagCode2) => {
   DiagCode2["POTENTIAL_DATA_LOSS"] = "POTENTIAL_DATA_LOSS";
   DiagCode2["COMPTIME_EVAL_FAILED"] = "COMPTIME_EVAL_FAILED";
   DiagCode2["COMPTIME_NON_CONST"] = "COMPTIME_NON_CONST";
+  DiagCode2["INVALID_BUILTIN_USAGE"] = "INVALID_BUILTIN_USAGE";
+  DiagCode2["INDEX_OUT_OF_BOUNDS"] = "INDEX_OUT_OF_BOUNDS";
   return DiagCode2;
 })(DiagCode || {});
 var DiagKind = /* @__PURE__ */ ((DiagKind2) => {
@@ -418,7 +420,8 @@ var ContextTracker = class {
       currentScope: 0,
       processingSymbols: /* @__PURE__ */ new Set(),
       pendingReferences: /* @__PURE__ */ new Map(),
-      resolvedSymbols: /* @__PURE__ */ new Set()
+      resolvedSymbols: /* @__PURE__ */ new Set(),
+      loopDepth: 0
     };
   }
   // └────────────────────────────────────────────────────────────────────┘
@@ -431,7 +434,8 @@ var ContextTracker = class {
       modulePath: this.context.currentModulePath,
       spanStackDepth: this.context.contextSpanStack.length,
       declarationStackDepth: this.context.declarationStack.length,
-      expressionStackDepth: this.context.expressionStack.length
+      expressionStackDepth: this.context.expressionStack.length,
+      loopDepth: this.context.loopDepth
     };
     (_a = this.debugManager) == null ? void 0 : _a.log(
       "verbose",
@@ -451,6 +455,7 @@ var ContextTracker = class {
     this.context.currentScope = state.scopeId;
     this.context.currentModuleName = state.moduleName;
     this.context.currentModulePath = state.modulePath;
+    this.context.loopDepth = state.loopDepth;
     this.restoreStack(this.context.contextSpanStack, state.spanStackDepth, "contextSpan");
     this.restoreStack(this.context.expressionStack, state.expressionStackDepth, "expression");
     while (this.context.declarationStack.length > state.declarationStackDepth) {
@@ -687,6 +692,28 @@ var ContextTracker = class {
       };
     }
     return { isForwardReference: false };
+  }
+  // └────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────── LOOP TRACKING ──────────────────────────┐
+  enterLoop() {
+    var _a;
+    this.context.loopDepth++;
+    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Entered loop (depth: ${this.context.loopDepth})`);
+  }
+  exitLoop() {
+    var _a, _b;
+    if (this.context.loopDepth > 0) {
+      this.context.loopDepth--;
+      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Exited loop (depth: ${this.context.loopDepth})`);
+    } else {
+      (_b = this.debugManager) == null ? void 0 : _b.log("errors", `Context: Attempted to exit loop when not in any loop`);
+    }
+  }
+  getLoopDepth() {
+    return this.context.loopDepth;
+  }
+  isInLoop() {
+    return this.context.loopDepth > 0;
   }
   // └────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── CONTEXT QUERIES ────────────────────────┐
@@ -1179,6 +1206,17 @@ var ScopeManager = class {
       ], AST.TypeNode.asVoid({ start: 0, end: 0 })),
       callable: true
     });
+    this.createBuiltinSymbol("Function" /* Function */, "@i", {
+      type: AST.TypeNode.asFunction({ start: 0, end: 0 }, [
+        AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)
+      ], AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)),
+      callable: true,
+      metadata: {
+        isLoopIndexFunction: true,
+        hasOptionalParameter: true,
+        defaultParameterValue: 0
+      }
+    });
     this.createBuiltinSymbol("Definition" /* Definition */, "slice", {
       type: AST.TypeNode.asU8Array({ start: 0, end: 0 })
     });
@@ -1210,10 +1248,10 @@ var ScopeManager = class {
       declared: true,
       isTypeChecked: true,
       isExported: false,
-      metadata: {
+      metadata: __spreadValues({
         callable: options.callable || false,
         isBuiltin: true
-      }
+      }, options.metadata)
     };
     this.globalScope.symbols.set(name, symbol);
     this.symbolTable.set(symbol.id, symbol);
@@ -2549,6 +2587,7 @@ var SymbolCollector = class extends PhaseBase {
     this.config.services.scopeManager.withScope(loopScope.id, () => {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.contextTracker.setScope(loopScope.id);
+        this.config.services.contextTracker.enterLoop();
         switch (loopNode.kind) {
           case "While":
             this.collectExpr(loopNode.expr, loopScope, moduleName);
@@ -2564,6 +2603,7 @@ var SymbolCollector = class extends PhaseBase {
             break;
         }
       });
+      this.config.services.contextTracker.exitLoop();
     });
   }
   // └──────────────────────────────────────────────────────────────────────┘
@@ -4281,24 +4321,25 @@ var SymbolResolver = class extends PhaseBase {
   }
   resolveLoopStmt(loopStmt) {
     this.log("symbols", "Resolving loop statement");
-    const loopScope = this.config.services.scopeManager.findChildScopeByName("loop", "Loop" /* Loop */);
-    if (loopScope) {
-      this.config.services.contextTracker.withSavedState(() => {
-        this.config.services.contextTracker.setScope(loopScope.id);
-        this.config.services.scopeManager.withScope(loopScope.id, () => {
-          if (loopStmt.kind === "While") {
-            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-          } else if (loopStmt.kind === "Do") {
-            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-          } else if (loopStmt.kind === "For") {
-            if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-            if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-          }
-        });
+    const currentScope = this.config.services.scopeManager.getCurrentScope();
+    const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "loop", currentScope.id);
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.contextTracker.setScope(loopScope.id);
+      this.config.services.contextTracker.enterLoop();
+      this.config.services.scopeManager.withScope(loopScope.id, () => {
+        if (loopStmt.kind === "While") {
+          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+        } else if (loopStmt.kind === "Do") {
+          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+        } else if (loopStmt.kind === "For") {
+          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
+          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
+        }
       });
-    }
+    });
+    this.config.services.contextTracker.exitLoop();
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
@@ -9440,6 +9481,7 @@ var TypeValidator = class extends PhaseBase {
     if (!loopScope) return;
     this.config.services.contextTracker.withSavedState(() => {
       this.config.services.scopeManager.withScope(loopScope.id, () => {
+        this.config.services.contextTracker.enterLoop();
         if (loopStmt.expr) {
           const condType = this.typeInference.inferExpressionType(loopStmt.expr);
           if (loopStmt.kind === "While" && condType && !condType.isBool()) {
@@ -9450,6 +9492,7 @@ var TypeValidator = class extends PhaseBase {
           this.validateStmt(loopStmt.stmt);
         }
       });
+      this.config.services.contextTracker.exitLoop();
     });
   }
   // └──────────────────────────────────────────────────────────────────────┘
@@ -10144,6 +10187,9 @@ var TypeValidator = class extends PhaseBase {
       return AST5.TypeNode.asVoid(call.span);
     }
     const func = funcType.getFunction();
+    if (builtinName === "@i") {
+      return this.validateLoopIndexCall(call, builtinSymbol);
+    }
     if (func.params.length !== call.args.length) {
       const code = func.params.length > call.args.length ? "TOO_FEW_ARGUMENTS" /* TOO_FEW_ARGUMENTS */ : "TOO_MANY_ARGUMENTS" /* TOO_MANY_ARGUMENTS */;
       this.reportError(
@@ -10167,6 +10213,75 @@ var TypeValidator = class extends PhaseBase {
       }
     }
     return func.returnType || AST5.TypeNode.asVoid(call.span);
+  }
+  validateLoopIndexCall(call, builtinSymbol) {
+    if (!this.config.services.contextTracker.isInLoop()) {
+      this.reportError(
+        "INVALID_BUILTIN_USAGE" /* INVALID_BUILTIN_USAGE */,
+        "Builtin '@i' can only be used inside a loop context",
+        call.base.span
+      );
+      return AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+    }
+    const func = builtinSymbol.type.getFunction();
+    const currentLoopDepth = this.config.services.contextTracker.getLoopDepth();
+    if (call.args.length === 0) {
+      return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+    }
+    if (call.args.length === 1) {
+      const arg = call.args[0];
+      const argType = this.typeInference.inferExpressionType(arg);
+      if (!argType) {
+        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      }
+      const argValue = this.evaluateConstantExpression(arg);
+      if (argValue !== null && typeof argValue === "number" && argValue < 0) {
+        this.reportError(
+          "INDEX_OUT_OF_BOUNDS" /* INDEX_OUT_OF_BOUNDS */,
+          "Loop index must be non-negative, got " + argValue,
+          arg.span
+        );
+        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      }
+      if (!this.typeInference.isTypeCompatible(func.params[0], argType)) {
+        this.reportError(
+          "TYPE_MISMATCH" /* TYPE_MISMATCH */,
+          `Argument type '${this.typeInference.getTypeDisplayName(argType)}' is not compatible with parameter type '${this.typeInference.getTypeDisplayName(func.params[0])}'`,
+          arg.span
+        );
+        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      }
+      if (argValue !== null && typeof argValue === "number" && argValue >= currentLoopDepth) {
+        this.reportError(
+          "INDEX_OUT_OF_BOUNDS" /* INDEX_OUT_OF_BOUNDS */,
+          `Loop index ${argValue} is out of bounds (current loop depth: ${currentLoopDepth})`,
+          arg.span
+        );
+      }
+      return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+    }
+    this.reportError(
+      "TOO_MANY_ARGUMENTS" /* TOO_MANY_ARGUMENTS */,
+      `Builtin '@i' expects at most 1 argument, but got ${call.args.length}`,
+      call.args.length > 1 ? { start: call.args[1].span.start, end: call.args[call.args.length - 1].span.end } : call.span
+    );
+    return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+  }
+  evaluateConstantExpression(expr) {
+    if (expr.is("Primary")) {
+      const primary = expr.getPrimary();
+      if (primary == null ? void 0 : primary.is("Literal")) {
+        const literal = primary.getLiteral();
+        if ((literal == null ? void 0 : literal.kind) === "Integer") {
+          try {
+            return parseInt(literal.value, 10);
+          } catch (e) {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
   }
   validateStructMethodCall(call, access, structType) {
     var _a;
