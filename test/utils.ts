@@ -10,7 +10,8 @@
     import { ParseError }               from '@je-es/parser';
     import * as AST                     from '@je-es/ast';
     import * as rules                   from '@kemet-lang/rules';
-    import { Analyzer, AnalysisPhase, Diagnostic, AnalysisResult, DiagCode, DiagKind }  from '../lib/ast-analyzer';
+    import { Analyzer, AnalysisPhase, Diagnostic, AnalysisResult, DiagCode, DiagKind }
+                                        from '../lib/ast-analyzer';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -79,9 +80,6 @@
 
         let result : AnalysisResult = { success: false, diagnostics: [] };
         function check (MustBesuccess: boolean, MustBeDiag: Diagnostic[]) {
-            // clean up all errors related to print module
-            // result.diagnostics = result.diagnostics.filter(d => d.sourceModuleName !== 'print');
-
             // Success and error count must match
             expect(result.success).toEqual(MustBesuccess);
 
@@ -123,7 +121,7 @@
                         if(parserResult.errors.length > 0) {
                             result = {
                                 success: false,
-                                diagnostics: parserErrorsToDiags(parserResult.errors),
+                                diagnostics: parserErrorsToDiagnostics(parserResult.errors),
                             };
                         }
 
@@ -150,15 +148,7 @@
                         {
                             // a trick for debugging (delete it later)
                             try     { check(success, diagnostics as Diagnostic[]); }
-                            catch   {
-                                console.warn(JSON.stringify(result.diagnostics, null, 2));
-
-                                // // print scope with its symbols
-                                // const scopes = analyzer.scopeManager.getAllScopes();
-                                // for(const scope of scopes) {
-                                //     console.log(`${scope.name} : ${JSON.stringify(scope.symbols, null, 2)}`);
-                                // }
-                            }
+                            catch   { console.warn(JSON.stringify(result.diagnostics, null, 2)); }
 
                             check(success, diagnostics as Diagnostic[]);
 
@@ -192,7 +182,7 @@
 
 // ╔════════════════════════════════════════ HELP ════════════════════════════════════════╗
 
-    function parserErrorsToDiags(parserErrors: ParseError[]) : Diagnostic[] {
+    function parserErrorsToDiagnostics(parserErrors: ParseError[]) : Diagnostic[] {
         const diags : Diagnostic[] = [];
 
         for(const e of parserErrors) {

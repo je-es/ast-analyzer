@@ -13,7 +13,7 @@
     import { ScopeManager }                         from './components/ScopeManager';
     import { SymbolCollector }                      from './phases/SymbolCollector';
     import { SymbolResolver }                       from './phases/SymbolResolver';
-    import { TypeValidator }                        from './phases/TypeValidator';
+    import { TypeValidator }                        from './phases/TypeValidator/TypeValidator';
     import { SemanticValidator }                    from './phases/SemanticValidator';
 
     // Re-export

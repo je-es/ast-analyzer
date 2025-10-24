@@ -38,6 +38,7 @@
         Parameter       = 'Parameter',
         StructField     = 'StructField',
         EnumVariant     = 'EnumVariant',
+        Type            = 'Type',
         Error           = 'Error'
     }
 

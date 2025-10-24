@@ -7,11 +7,11 @@
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
     import * as AST                 from '@je-es/ast';
-    import { DiagCode }             from './DiagnosticManager';
-    import { AnalysisConfig }       from '../ast-analyzer';
+    import { DiagCode }             from '../../components/DiagnosticManager';
+    import { AnalysisConfig }       from '../../ast-analyzer';
     import { Scope, Symbol, SymbolKind, ScopeKind }
-                                    from './ScopeManager';
-    import { DebugKind }            from './DebugManager';
+                                    from '../../components/ScopeManager';
+    import { DebugKind }            from '../../components/DebugManager';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 

@@ -2,19 +2,9 @@
 
     ...
 
-    - add : array type length member, e.g. `let name = "Maysara"; let len = name.len;`
+    - fix : default arg must be not required.
 
-    - add : tuple type length member and member access via array syntax, e.g. `let t = . { x,y,z };` then `t.len` and `t[0]`.
-
-    - add : slice concatenation, e.g. `let name = "Maysara"; let greeting = "Hello" + " " + name;`
-
-    - add : slice by range, e.g. `let name = "Maysara"; let my_slice = name[0..1]; // "Ma"`
-
-    - fix : type `type` must accept any type.
-
-    - change : `switch` to `match` and `case x :` to `x =>`
-
-    - fix : `union`/`struct`/`enum`/`fn` types.
+    - improvement: split `Type Validator.ts` into smaller modules.
 
 - # Current
 
@@ -24,4 +14,4 @@
 
     - add `std` lib.
 
-    - impl meta/builtin `@..`
+    - complete meta/builtin `@..`, e.g. `@i(level)`.

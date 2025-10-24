@@ -606,7 +606,7 @@
                         cspan: { start: 36, end: 39 },
                         tspan: { start: 36, end: 39 },
                         kind: 'error',
-                        msg: "Expected 1 arguments, but got 0",
+                        msg: "Expected at least 1 arguments, but got 0",
                         code: 'TOO_FEW_ARGUMENTS'
                     }
                 ]
@@ -619,7 +619,7 @@
                         cspan: { start: 36, end: 55 },
                         tspan: { start: 36, end: 55 },
                         kind: 'error',
-                        msg: "Expected 1 arguments, but got 2",
+                        msg: "Expected at most 1 arguments, but got 2",
                         code: 'TOO_MANY_ARGUMENTS'
                     }
                 ]
