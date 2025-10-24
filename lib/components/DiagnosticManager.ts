@@ -144,6 +144,9 @@
         // Builtin validation
         INVALID_BUILTIN_USAGE       = 'INVALID_BUILTIN_USAGE',         // Builtin used in wrong context
         INDEX_OUT_OF_BOUNDS         = 'INDEX_OUT_OF_BOUNDS',           // Index out of bounds error
+
+        // Unreachable code
+        UNREACHABLE_CODE            = 'UNREACHABLE_CODE',               // Unreachable code detected
     }
 
     export enum DiagKind {

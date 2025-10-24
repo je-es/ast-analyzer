@@ -184,6 +184,8 @@
                         return this.inferObjectType(primary.getObject()!);
                     case 'Type':
                         return primary.getType();
+                    case 'Unreachable':
+                        return AST.TypeNode.asNoreturn(primary.span);
                     default:
                         return null;
                 }

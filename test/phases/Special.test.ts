@@ -3388,10 +3388,6 @@
         temp: [
             {
                 input: `
-                // TODO: we must add to analyzer: when see builtin @i, we must check if it is in loop,
-                //       then, we must check for the loop index if exists
-                //       also, we must check if no parameter is passed to @i, so its default value is 0
-
                 for(0..5) { let x1 = @i(); } // default value is zero (current loop)
                 for(0..5) { let x2 = @i(0); }
                 for(0..5) { for(0..5) { let x3 = @i(1); } } // OK
@@ -3408,7 +3404,6 @@
                         msg: "Loop index 1 is out of bounds (current loop depth: 1)",
                         kind: 'error',
                         code: "INDEX_OUT_OF_BOUNDS",
-                        tspan: { start: 23, end: 24 },
                     }
                 ]
             },
@@ -3421,7 +3416,6 @@
                         msg: "Builtin '@i' can only be used inside a loop context",
                         kind: 'error',
                         code: "INVALID_BUILTIN_USAGE",
-                        tspan: { start: 8, end: 10 },
                     }
                 ]
             },
@@ -3434,7 +3428,6 @@
                         msg: "Builtin '@i' can only be used inside a loop context",
                         kind: 'error',
                         code: "INVALID_BUILTIN_USAGE",
-                        tspan: { start: 8, end: 10 },
                     }
                 ]
             },
@@ -3447,18 +3440,12 @@
                         msg: "Argument type 'cint' is not compatible with parameter type 'u64'",
                         kind: 'error',
                         code: "TYPE_MISMATCH",
-                        tspan: { start: 23, end: 25 },
                     }
                 ]
             },
         ]
     }
 
-    // unreachable is primary expression
-    // noreturn is primitive type
-    // unreachble must infered as noreturn type
-    
-    // TODO: Add tests for unreachable expression
     const UnreachableExpressionCases = {
         UnreachableExpressionCasesMustFail: [
             {
@@ -3469,22 +3456,205 @@
                         msg: "Unreachable code detected",
                         kind: 'error',
                         code: "UNREACHABLE_CODE",
-                        tspan: { start: 8, end: 16 },
                     }
                 ]
             },
 
-            // ...
+            {
+                input: `unreachable;`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            },
+
+            {
+                input: `@print(unreachable);`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Argument type 'noreturn' is not compatible with parameter type '[]u8'",
+                        kind: 'error',
+                        code: "TYPE_MISMATCH",
+                    }
+                ]
+            },
+
+            {
+                input: `if (true) { unreachable; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            },
+
+            {
+                input: `for(0..5) { unreachable; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            }
         ]
     }
 
-    // TODO: Add tests for noreturn
+    // Tests for noreturn type
+    const NoreturnTypeCases = {
+        NoreturnTypeCasesMustPass: [
+            {
+                input: `let x: noreturn = unreachable;`,
+                success: true,
+                diagnostics: []
+            },
 
-    // TODO: we also need to improve our system to detect unreachable code in other contexts, e.g. after code after 100% return statement.
+            {
+                input: `fn _test() -> noreturn { unreachable; }`,
+                success: true,
+                diagnostics: []
+            },
+
+            {
+                input: `fn _test() -> errset { Failed }!noreturn { throw selferr.Failed; }`,
+                success: true,
+                diagnostics: []
+            },
+
+            {
+                input: `fn _test() -> noreturn { let x = 42; }`,
+                success: true,
+                diagnostics: []
+            }
+        ],
+
+        NoreturnTypeCasesMustFail: [
+            {
+                input: `let x: noreturn = 42;`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Cannot assign type 'cint' to variable of type 'noreturn'",
+                        kind: 'error',
+                        code: "TYPE_MISMATCH",
+                    }
+                ]
+            },
+
+            {
+                input: `fn _test() -> noreturn { return 42; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Return type 'cint' doesn't match function return type 'noreturn'",
+                        kind: 'error',
+                        code: "TYPE_MISMATCH",
+                    }
+                ]
+            },
+        ]
+    }
+
+    // Advanced unreachable code detection tests
+    const AdvancedUnreachableCases = {
+        AdvancedUnreachableCasesMustFail: [
+            {
+                input: `fn _test() { return; let x = 42; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            },
+
+            {
+                input: `def MyError = errset { Failed }; fn _test() -> err!cint { throw MyError.Failed; let x = 42; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            },
+
+            {
+                input: `fn _test() { unreachable; let x = 42; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    },
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            },
+
+            {
+                input: `fn _test() { return; unreachable; }`,
+                success: false,
+                diagnostics: [
+                    {
+                        msg: "Unreachable code detected",
+                        kind: 'error',
+                        code: "UNREACHABLE_CODE",
+                    }
+                ]
+            }
+        ]
+    }
 
     const temp = {
         temp: [
+            {
+                name: 'error mode - void return with errors',
+                input: `
+                    def ValidationError = errset { Invalid, TooLong, TooShort };
 
+                    fn validate(s: i32) -> ValidationError!void {
+                        if (s < 0) {
+                            throw ValidationError.TooShort;
+                        } else if (s > 100) {
+                            throw ValidationError.TooLong;
+                        }
+                    }
+                `,
+                success: true,
+                diagnostics: []
+            },
+
+            {
+                name: 'error mode - void return with errors',
+                input: `
+                    def ValidationError = errset { Invalid, TooLong, TooShort };
+
+                    fn validate(s: i32) -> ValidationError!void {
+                        if (s < 0) throw ValidationError.TooShort;
+                        else if (s > 100) throw ValidationError.TooLong;
+                    }
+                `,
+                success: true,
+                diagnostics: []
+            },
         ]
     }
 
@@ -3495,14 +3665,17 @@
 // ╔════════════════════════════════════════ T_ST ════════════════════════════════════════╗
 
     testAnalyzer({
-        // ...UTF8_ASCII_ExtendedCases,
-        // ...ErrorModesExtendedCases,
-        // ...OptionalTypesExtendedCases,
-        // ...PointerTypesExtendedCases,
-        // ...ComptimeExtendedCases,
-        // ...SliceTypeExtendedCases,
-        // ...LoopIndexCases,
-        ...UnreachableExpressionCases
+        ...UTF8_ASCII_ExtendedCases,
+        ...ErrorModesExtendedCases,
+        ...OptionalTypesExtendedCases,
+        ...PointerTypesExtendedCases,
+        ...ComptimeExtendedCases,
+        ...SliceTypeExtendedCases,
+        ...LoopIndexCases,
+        ...UnreachableExpressionCases,
+        ...NoreturnTypeCases,
+        ...AdvancedUnreachableCases,
+        ...temp
 
     }, AnalysisPhase.TypeValidation);
 

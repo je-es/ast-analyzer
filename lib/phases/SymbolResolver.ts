@@ -1406,6 +1406,11 @@
                         this.resolveType(type, tempSymbol, contextSpan);
                         break;
                     }
+                    case 'Unreachable': {
+                        // Unreachable expressions are handled in type validation phase
+                        // No symbol resolution needed for unreachable expressions
+                        break;
+                    }
                     default:
                         this.log('verbose', `Unhandled primary type: ${primary.kind}`);
                         break;

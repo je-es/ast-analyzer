@@ -468,7 +468,8 @@ declare enum DiagCode {
     COMPTIME_EVAL_FAILED = "COMPTIME_EVAL_FAILED",// Comptime evaluation failed
     COMPTIME_NON_CONST = "COMPTIME_NON_CONST",// Non-const in comptime context
     INVALID_BUILTIN_USAGE = "INVALID_BUILTIN_USAGE",// Builtin used in wrong context
-    INDEX_OUT_OF_BOUNDS = "INDEX_OUT_OF_BOUNDS"
+    INDEX_OUT_OF_BOUNDS = "INDEX_OUT_OF_BOUNDS",// Index out of bounds error
+    UNREACHABLE_CODE = "UNREACHABLE_CODE"
 }
 declare enum DiagKind {
     ERROR = "error",
@@ -942,6 +943,8 @@ declare class TypeValidator extends PhaseBase {
     validateMethodCallContext(call: AST.CallNode, methodSymbol: Symbol, isStaticAccess: boolean, baseExpr: AST.ExprNode): void;
     validateMutabilityAssignment(leftSymbol: Symbol, leftExpr: AST.ExprNode): boolean;
     validateAssignment(binary: AST.BinaryNode): void;
+    validateUnreachableExpression(expr: AST.ExprNode): void;
+    isInAppropriateUnreachableContext(expr: AST.ExprNode): boolean;
     validateEnumVariantConstruction(call: AST.CallNode, access: AST.MemberAccessNode, enumType: AST.TypeNode): AST.TypeNode | null;
     validateMemberVisibility(memberSymbol: Symbol, structScope: Scope, accessSpan: AST.Span): void;
     validateBuiltinCall(call: AST.CallNode): AST.TypeNode | null;
@@ -969,6 +972,8 @@ declare class TypeValidator extends PhaseBase {
     extractEnumVariantName(expr: AST.ExprNode): string | null;
     extractTypeName(typeNode: AST.TypeNode): string | null;
     findModuleScope(moduleName: string): Scope | null;
+    private statementAlwaysExits;
+    private blockAlwaysExits;
     isBuiltinFunction(baseExpr: AST.ExprNode): boolean;
     isInsideFunctionScope(): boolean;
     init(): boolean;

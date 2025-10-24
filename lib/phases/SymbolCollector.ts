@@ -1421,6 +1421,11 @@
                         }
                         break;
                     }
+                    case 'Unreachable': {
+                        // Unreachable expressions are handled in type validation phase
+                        // No symbol collection needed for unreachable expressions
+                        break;
+                    }
                 }
             }
 

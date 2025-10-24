@@ -120,6 +120,7 @@ var DiagCode = /* @__PURE__ */ ((DiagCode2) => {
   DiagCode2["COMPTIME_NON_CONST"] = "COMPTIME_NON_CONST";
   DiagCode2["INVALID_BUILTIN_USAGE"] = "INVALID_BUILTIN_USAGE";
   DiagCode2["INDEX_OUT_OF_BOUNDS"] = "INDEX_OUT_OF_BOUNDS";
+  DiagCode2["UNREACHABLE_CODE"] = "UNREACHABLE_CODE";
   return DiagCode2;
 })(DiagCode || {});
 var DiagKind = /* @__PURE__ */ ((DiagKind2) => {
@@ -2846,6 +2847,9 @@ var SymbolCollector = class extends PhaseBase {
         }
         break;
       }
+      case "Unreachable": {
+        break;
+      }
     }
   }
   validateSelfUsage(currentScope, span) {
@@ -4499,6 +4503,9 @@ var SymbolResolver = class extends PhaseBase {
           isExported: false
         };
         this.resolveType(type, tempSymbol, contextSpan);
+        break;
+      }
+      case "Unreachable": {
         break;
       }
       default:
@@ -6919,6 +6926,8 @@ var TypeInference = class {
         return this.inferObjectType(primary.getObject());
       case "Type":
         return primary.getType();
+      case "Unreachable":
+        return AST4.TypeNode.asNoreturn(primary.span);
       default:
         return null;
     }
@@ -8954,12 +8963,12 @@ var TypeValidator = class extends PhaseBase {
           this.processStmtByKind(stmt, {
             "Block": (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
             "Test": (testNode) => this.handleTestStmt(testNode, currentScope, moduleName),
-            // 'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
             "Def": (defNode) => this.handleDefStmt(defNode, currentScope, moduleName),
             "Let": (letNode) => this.handleLetStmt(letNode, currentScope, moduleName),
             "Func": (funcNode) => this.handleFuncStmt(funcNode, currentScope, moduleName),
             "Expression": (exprNode) => {
               const expr = stmt.getExpr();
+              this.validateUnreachableExpression(expr);
               if (expr.kind === "Binary") {
                 const binary = expr.getBinary();
                 if (binary && binary.kind === "Assignment") {
@@ -9000,8 +9009,21 @@ var TypeValidator = class extends PhaseBase {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.contextTracker.setScope(blockScope.id);
         this.config.services.scopeManager.withScope(blockScope.id, () => {
-          for (const stmt of block.stmts) {
+          let reachedUnreachablePoint = false;
+          for (let i = 0; i < block.stmts.length; i++) {
+            const stmt = block.stmts[i];
+            if (reachedUnreachablePoint) {
+              this.reportError(
+                "UNREACHABLE_CODE" /* UNREACHABLE_CODE */,
+                "Unreachable code detected",
+                stmt.span
+              );
+              continue;
+            }
             this.validateStmt(stmt, blockScope);
+            if (this.statementAlwaysExits(stmt)) {
+              reachedUnreachablePoint = true;
+            }
           }
         });
       });
@@ -9078,6 +9100,7 @@ var TypeValidator = class extends PhaseBase {
     return true;
   }
   validateLetStmt(letNode) {
+    var _a;
     this.logSymbolValidation("Type checking variable", letNode.field.ident.name);
     const symbol = this.config.services.scopeManager.getSymbolInCurrentScope(letNode.field.ident.name);
     if (!symbol) return;
@@ -9101,6 +9124,10 @@ var TypeValidator = class extends PhaseBase {
     }
     let initType = null;
     if (letNode.field.initializer) {
+      if ((_a = letNode.field.type) == null ? void 0 : _a.isNoreturn()) {
+      } else {
+        this.validateUnreachableExpression(letNode.field.initializer);
+      }
       initType = this.extractTypeFromInitializer(letNode.field.initializer);
       if (initType && (initType.isStruct() || initType.isEnum())) {
         if (initType.isStruct()) {
@@ -9263,7 +9290,7 @@ var TypeValidator = class extends PhaseBase {
     try {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(funcScope.id, () => {
-          var _a2, _b2, _c, _d;
+          var _a2, _b2, _c, _d, _e;
           if (isInstanceMethod) {
             this.resolveSelfParameter(funcScope, parentScope);
           }
@@ -9306,7 +9333,7 @@ var TypeValidator = class extends PhaseBase {
             const expectedReturnType = funcNode.returnType || this.currentFunctionReturnType;
             if (expectedReturnType && !expectedReturnType.isVoid()) {
               const hasErrorType = funcNode.errorType || this.currentFunctionErrorType;
-              if (!this.hasReturnStatement) {
+              if (!this.hasReturnStatement && !((_e = funcNode.returnType) == null ? void 0 : _e.isNoreturn())) {
                 if (!hasErrorType || !this.hasThrowStatement) {
                   this.reportError(
                     "MISSING_RETURN_STATEMENT" /* MISSING_RETURN_STATEMENT */,
@@ -10074,6 +10101,28 @@ var TypeValidator = class extends PhaseBase {
     if (leftType) {
       this.validateValueFitsInType(binary.right, leftType);
     }
+  }
+  validateUnreachableExpression(expr) {
+    if (expr.is("Primary")) {
+      const primary = expr.getPrimary();
+      if ((primary == null ? void 0 : primary.kind) === "Unreachable") {
+        const isInAppropriateContext = this.isInAppropriateUnreachableContext(expr);
+        if (!isInAppropriateContext) {
+          this.reportError(
+            "UNREACHABLE_CODE" /* UNREACHABLE_CODE */,
+            "Unreachable code detected",
+            (primary == null ? void 0 : primary.span) || expr.span
+          );
+        }
+      }
+    }
+  }
+  isInAppropriateUnreachableContext(expr) {
+    var _a;
+    if ((_a = this.currentFunctionReturnType) == null ? void 0 : _a.isNoreturn()) {
+      return true;
+    }
+    return false;
   }
   // ===== PREFIX OPERATIONS =====
   // ===== POSTFIX OPERATIONS =====
@@ -10998,6 +11047,45 @@ var TypeValidator = class extends PhaseBase {
       this.reportError("MODULE_SCOPE_NOT_FOUND" /* MODULE_SCOPE_NOT_FOUND */, `Module scope for '${moduleName}' not found`);
     }
     return moduleScope;
+  }
+  statementAlwaysExits(stmt) {
+    var _a;
+    switch (stmt.kind) {
+      case "Return":
+      case "Throw":
+        return true;
+      case "Expression": {
+        const expr = stmt.getExpr();
+        if (expr == null ? void 0 : expr.is("Primary")) {
+          const primary = expr.getPrimary();
+          if ((primary == null ? void 0 : primary.kind) === "Unreachable") {
+            return true;
+          }
+        }
+        return false;
+      }
+      case "Block": {
+        const block = (_a = stmt.getBlock) == null ? void 0 : _a.call(stmt);
+        if (block) {
+          return this.blockAlwaysExits(block);
+        }
+        return false;
+      }
+      case "While":
+      case "Do":
+      case "For":
+        return false;
+      default:
+        return false;
+    }
+  }
+  blockAlwaysExits(block) {
+    for (const stmt of block.stmts) {
+      if (this.statementAlwaysExits(stmt)) {
+        return true;
+      }
+    }
+    return false;
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐

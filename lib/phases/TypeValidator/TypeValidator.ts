@@ -193,6 +193,7 @@
                 }
 
                 this.log('verbose', `Validating ${stmt.kind} statement`);
+
                 this.config.services.contextTracker.pushContextSpan(stmt.span);
 
                 try {
@@ -202,12 +203,15 @@
                             this.processStmtByKind(stmt, {
                                 'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
                                 'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
-                                // 'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
                                 'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
                                 'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
                                 'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
                                 'Expression': (exprNode)  => {
                                     const expr = stmt.getExpr()!;
+
+                                    // Check for unreachable expressions
+                                    this.validateUnreachableExpression(expr);
+
                                     if (expr.kind === 'Binary') {
                                         const binary = expr.getBinary();
 
@@ -259,8 +263,29 @@
                         this.config.services.contextTracker.setScope(blockScope.id);
 
                         this.config.services.scopeManager.withScope(blockScope.id, () => {
-                            for (const stmt of block.stmts) {
+                            let reachedUnreachablePoint = false;
+
+                            for (let i = 0; i < block.stmts.length; i++) {
+                                const stmt = block.stmts[i];
+
+                                // Report if we're past an unreachable point
+                                if (reachedUnreachablePoint) {
+                                    this.reportError(
+                                        DiagCode.UNREACHABLE_CODE,
+                                        'Unreachable code detected',
+                                        stmt.span
+                                    );
+                                    // Continue checking syntax but skip deep validation
+                                    continue;
+                                }
+
+                                // Validate the statement normally
                                 this.validateStmt(stmt, blockScope);
+
+                                // Check if THIS statement makes subsequent code unreachable
+                                if (this.statementAlwaysExits(stmt)) {
+                                    reachedUnreachablePoint = true;
+                                }
                             }
                         });
                     });
@@ -408,6 +433,15 @@
 
                 let initType = null;
                 if (letNode.field.initializer) {
+                    // Check for unreachable expressions in initializer
+                    // Only report error if the variable type is not noreturn
+                    if (letNode.field.type?.isNoreturn()) {
+                        // Allow unreachable expressions for noreturn variables
+                        // Don't call validateUnreachableExpression
+                    } else {
+                        this.validateUnreachableExpression(letNode.field.initializer);
+                    }
+
                     initType = this.extractTypeFromInitializer(letNode.field.initializer);
 
                     if (initType && (initType.isStruct() || initType.isEnum())) {
@@ -586,7 +620,7 @@
 
                 // For struct methods, funcSymbol.scope points to the Type scope (Point)
                 const parentScope = funcSymbolScope.kind === ScopeKind.Type &&
-                                funcSymbolScope.metadata?.typeKind === 'Struct'
+                                        funcSymbolScope.metadata?.typeKind === 'Struct'
                     ? funcSymbolScope
                     : null;
 
@@ -676,7 +710,7 @@
                                 if (expectedReturnType && !expectedReturnType.isVoid()) {
                                     const hasErrorType = funcNode.errorType || this.currentFunctionErrorType;
 
-                                    if (!this.hasReturnStatement) {
+                                    if (!this.hasReturnStatement && !funcNode.returnType?.isNoreturn()) {
                                         if (!hasErrorType || !this.hasThrowStatement) {
                                             this.reportError(
                                                 DiagCode.MISSING_RETURN_STATEMENT,
@@ -902,7 +936,7 @@
                             this.validateStmt(loopStmt.stmt);
                         }
                     });
-                    
+
                     this.config.services.contextTracker.exitLoop();
                 });
             }
@@ -1018,8 +1052,6 @@
                     }
                 }
             }
-
-            
 
             validateDeferStmt(deferNode: AST.ControlFlowStmtNode): void {
                 if (deferNode.value) {
@@ -1666,6 +1698,35 @@
                 if (leftType) {
                     this.validateValueFitsInType(binary.right, leftType);
                 }
+            }
+
+            validateUnreachableExpression(expr: AST.ExprNode): void {
+                // Check if this is an unreachable expression
+                if (expr.is('Primary')) {
+                    const primary = expr.getPrimary();
+                    if (primary?.kind === 'Unreachable') {
+                        // Check if we're in an appropriate context
+                        const isInAppropriateContext = this.isInAppropriateUnreachableContext(expr);
+                        if (!isInAppropriateContext) {
+                            this.reportError(
+                                DiagCode.UNREACHABLE_CODE,
+                                'Unreachable code detected',
+                                primary?.span || expr.span
+                            );
+                        }
+                    }
+                }
+            }
+
+            isInAppropriateUnreachableContext(expr: AST.ExprNode): boolean {
+                // Check if we're in a noreturn function
+                if (this.currentFunctionReturnType?.isNoreturn()) {
+                    return true;
+                }
+
+                // unreachable is also valid in error contexts where we must throw
+                // but for now, be restrictive
+                return false;
             }
 
             // ===== PREFIX OPERATIONS =====
@@ -2887,7 +2948,50 @@
                 return moduleScope;
             }
 
+            private statementAlwaysExits(stmt: AST.StmtNode): boolean {
+                switch (stmt.kind) {
+                    case 'Return':
+                    case 'Throw':
+                        return true;
 
+                    case 'Expression': {
+                        const expr = stmt.getExpr();
+                        if (expr?.is('Primary')) {
+                            const primary = expr.getPrimary();
+                            if (primary?.kind === 'Unreachable') {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+
+                    case 'Block': {
+                        const block = stmt.getBlock?.();
+                        if (block) {
+                            return this.blockAlwaysExits(block);
+                        }
+                        return false;
+                    }
+
+                    case 'While':
+                    case 'Do':
+                    case 'For':
+                        // Loops don't guarantee exit (might not execute or might break)
+                        return false;
+
+                    default:
+                        return false;
+                }
+            }
+            private blockAlwaysExits(block: AST.BlockStmtNode): boolean {
+                // A block exits if any statement in it exits
+                for (const stmt of block.stmts) {
+                    if (this.statementAlwaysExits(stmt)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
 
         // └──────────────────────────────────────────────────────────────────────┘
 
