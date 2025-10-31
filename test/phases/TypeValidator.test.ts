@@ -1054,7 +1054,7 @@
                     fn T_ST(c: Color) {
                         match (c) {
                             Color.Red=> {}
-                            default=> {}
+                            else => {}
                         }
                     }
                 `,

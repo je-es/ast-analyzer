@@ -201,21 +201,23 @@
                         this.config.services.contextTracker.withSavedState(() => {
                             this.config.services.contextTracker.setScope(currentScope.id);
                             this.processStmtByKind(stmt, {
-                                'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
-                                'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
-                                'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
-                                'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
-                                'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
-                                'Expression': (exprNode)  => {
+                                'section'   : (n) => this.validateSectionStmt(n, currentScope, moduleName),
+                                'block'     : (n) => this.validateBlockStmt(n, currentScope, moduleName),
+                                'test'      : (n) => this.handleTestStmt(n, currentScope, moduleName),
+                                'def'       : (n) => this.handleDefStmt(n, currentScope, moduleName),
+                                'let'       : (n) => this.handleLetStmt(n, currentScope, moduleName),
+                                'func'      : (n) => this.handleFuncStmt(n, currentScope, moduleName),
+
+                                'expression': (n) => {
                                     const expr = stmt.getExpr()!;
 
                                     // Check for unreachable expressions
                                     this.validateUnreachableExpression(expr);
 
-                                    if (expr.kind === 'Binary') {
+                                    if (expr.kind === 'binary') {
                                         const binary = expr.getBinary();
 
-                                        if (binary && binary.kind === 'Assignment') {
+                                        if (binary && binary.kind === 'assignment') {
                                             this.validateAssignment(binary);
                                         }
                                     }
@@ -223,14 +225,13 @@
                                     this.typeInference.inferExpressionType(expr);
                                 },
 
-                                // special cases
-                                'While'     : () => this.handleLoopStmt(stmt, currentScope, moduleName),
-                                'Do'        : () => this.handleLoopStmt(stmt, currentScope, moduleName),
-                                'For'       : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'while'     : (n) => this.validateWhileStmt(n),
+                                'do'        : (n) => this.validateDoStmt(n),
+                                'for'       : (n) => this.validateForStmt(n),
 
-                                'Return'    : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-                                'Defer'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-                                'Throw'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'return'    : (n) => this.validateReturnStmt(n),
+                                'defer'     : (n) => this.validateDeferStmt(n),
+                                'throw'     : (n) => this.validateThrowStmt(n),
                             });
                         });
                     });
@@ -249,10 +250,6 @@
 
 
         // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
-
-            handleBlockStmt(blockNode: AST.BlockStmtNode, scope?: Scope, moduleName?: string): void {
-                this.handleStatement(blockNode, this.validateBlockStmt.bind(this), scope, moduleName);
-            }
 
             validateBlockStmt(block: AST.BlockStmtNode, scope?: Scope, moduleName?: string): void {
                 this.log('symbols', 'Validating block');
@@ -290,6 +287,42 @@
                         });
                     });
                 }
+            }
+
+            validateSectionStmt(section: AST.SectionStmtNode, scope?: Scope, moduleName?: string): void {
+                this.log('symbols', 'Validating section');
+
+                const currentScope = this.config.services.scopeManager.getCurrentScope();
+                this.config.services.contextTracker.withSavedState(() => {
+                    this.config.services.contextTracker.setScope(currentScope.id);
+
+                    this.config.services.scopeManager.withScope(currentScope.id, () => {
+                        let reachedUnreachablePoint = false;
+
+                        for (let i = 0; i < section.stmts.length; i++) {
+                            const stmt = section.stmts[i];
+
+                            // Report if we're past an unreachable point
+                            if (reachedUnreachablePoint) {
+                                this.reportError(
+                                    DiagCode.UNREACHABLE_CODE,
+                                    'Unreachable code detected',
+                                    stmt.span
+                                );
+                                // Continue checking syntax but skip deep validation
+                                continue;
+                            }
+
+                            // Validate the statement normally
+                            this.validateStmt(stmt, currentScope);
+
+                            // Check if THIS statement makes subsequent code unreachable
+                            if (this.statementAlwaysExits(stmt)) {
+                                reachedUnreachablePoint = true;
+                            }
+                        }
+                    });
+                });
             }
 
             handleTestStmt(testNode: AST.TestStmtNode, scope: Scope, moduleName?: string): void {
@@ -342,9 +375,9 @@
                 contextName: string
             ): boolean {
                 // Only handle array literals
-                if (!initExpr.is('Primary')) return true;
+                if (!initExpr.is('primary')) return true;
                 const primary = initExpr.getPrimary();
-                if (!primary?.is('Literal')) return true;
+                if (!primary?.is('literal')) return true;
                 const literal = primary.getLiteral();
                 if (literal?.kind !== 'Array') return true;
 
@@ -476,9 +509,9 @@
                 }
 
                 else if (letNode.field.initializer && !letNode.field.type) {
-                    if ((letNode.field.initializer! as AST.ExprNode).is('Primary')) {
+                    if ((letNode.field.initializer! as AST.ExprNode).is('primary')) {
                         const primary = (letNode.field.initializer! as AST.ExprNode).getPrimary();
-                        if (primary && primary.is('Object')) {
+                        if (primary && primary.is('object')) {
                             const obj = primary.getObject()!;
 
                             if (obj.ident) {
@@ -549,9 +582,9 @@
                     }
 
                     // NEW: Check if initializer is an enum variant that requires a value
-                    if (letNode.field.initializer.is('Postfix')) {
+                    if (letNode.field.initializer.is('postfix')) {
                         const postfix = letNode.field.initializer.getPostfix();
-                        if (postfix?.kind === 'MemberAccess') {
+                        if (postfix?.kind === 'memberAccess') {
                             const access = postfix.getMemberAccess()!;
                             const baseType = this.typeInference.inferExpressionType(access.base);
 
@@ -579,6 +612,9 @@
                         letNode.field.span
                     );
                 }
+
+                if(symbol.type)
+                letNode.field.type = symbol.type;
 
                 this.markSymbolAsTypeChecked(symbol);
             }
@@ -825,9 +861,9 @@
                     }
 
                     // NEW: Check if initializer is an enum variant that requires a value
-                    if (paramNode.initializer.is('Postfix')) {
+                    if (paramNode.initializer.is('postfix')) {
                         const postfix = paramNode.initializer.getPostfix();
-                        if (postfix?.kind === 'MemberAccess') {
+                        if (postfix?.kind === 'memberAccess') {
                             const access = postfix.getMemberAccess()!;
                             const baseType = this.typeInference.inferExpressionType(access.base);
 
@@ -888,52 +924,74 @@
 
         // ┌───────────────────────────── [3.6] LOOP ─────────────────────────────┐
 
-            handleLoopStmt(stmt: AST.StmtNode, scope?: Scope, moduleName?: string): void {
-                if(stmt.getLoop === undefined) {
-                    const data = stmt;
-                    switch (stmt.kind) {
-                        case 'While' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createWhile(data.span, src.expr, src.stmt);
-                            this.validateLoopStmt(loop);
-                            break;
-                        }
-                        case 'Do' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createDo(data.span, src.expr, src.stmt);
-                            this.validateLoopStmt(loop);
-                            break;
-                        }
-                        case 'For' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createFor(data.span, src.expr, src.stmt);
-                            this.validateLoopStmt(loop);
-                            break;
-                        }
-                    }
-                } else {
-                    this.validateLoopStmt(stmt.getLoop()!);
-                }
-            }
-
-            validateLoopStmt(loopStmt: AST.LoopStmtNode): void {
-                const loopScope = this.config.services.scopeManager.findChildScopeByName('loop', ScopeKind.Loop);
+            validateWhileStmt(n: AST.WhileStmtNode): void {
+                const loopScope = this.config.services.scopeManager.findChildScopeByName('while', ScopeKind.Loop);
                 if (!loopScope) return;
 
                 this.config.services.contextTracker.withSavedState(() => {
                     this.config.services.scopeManager.withScope(loopScope.id, () => {
                         this.config.services.contextTracker.enterLoop();
 
-                        if (loopStmt.expr) {
-                            const condType = this.typeInference.inferExpressionType(loopStmt.expr);
+                        if (n.expr) {
+                            const condType = this.typeInference.inferExpressionType(n.expr);
 
-                            if (loopStmt.kind === 'While' && condType && !condType.isBool()) {
-                                this.log('verbose', `Loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+                            if (condType && !condType.isBool()) {
+                                this.log('verbose', `While loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
                             }
                         }
 
-                        if (loopStmt.stmt) {
-                            this.validateStmt(loopStmt.stmt);
+                        if (n.stmt) {
+                            this.validateStmt(n.stmt);
+                        }
+                    });
+
+                    this.config.services.contextTracker.exitLoop();
+                });
+            }
+
+            validateDoStmt(n: AST.DoStmtNode): void {
+                const loopScope = this.config.services.scopeManager.findChildScopeByName('do', ScopeKind.Loop);
+                if (!loopScope) return;
+
+                this.config.services.contextTracker.withSavedState(() => {
+                    this.config.services.scopeManager.withScope(loopScope.id, () => {
+                        this.config.services.contextTracker.enterLoop();
+
+                        if (n.expr) {
+                            const condType = this.typeInference.inferExpressionType(n.expr);
+
+                            if (condType && !condType.isBool()) {
+                                this.log('verbose', `Do loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+                            }
+                        }
+
+                        if (n.stmt) {
+                            this.validateStmt(n.stmt);
+                        }
+                    });
+
+                    this.config.services.contextTracker.exitLoop();
+                });
+            }
+
+            validateForStmt(n: AST.ForStmtNode): void {
+                const loopScope = this.config.services.scopeManager.findChildScopeByName('for', ScopeKind.Loop);
+                if (!loopScope) return;
+
+                this.config.services.contextTracker.withSavedState(() => {
+                    this.config.services.scopeManager.withScope(loopScope.id, () => {
+                        this.config.services.contextTracker.enterLoop();
+
+                        if (n.expr) {
+                            const condType = this.typeInference.inferExpressionType(n.expr);
+
+                            if (condType && !condType.isBool()) {
+                                this.log('verbose', `Do loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+                            }
+                        }
+
+                        if (n.stmt) {
+                            this.validateStmt(n.stmt);
                         }
                     });
 
@@ -946,48 +1004,7 @@
 
         // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
 
-            handleControlflowStmt(stmt: AST.StmtNode, scope?: Scope, moduleName?: string): void {
-                if(stmt.getCtrlflow === undefined) {
-                    const data = stmt;
-                    switch (stmt.kind) {
-                        case 'Return' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asReturn(data.span, src.value);
-                            this.validateReturnStmt(res);
-                            break;
-                        }
-                        case 'Defer' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asDefer(data.span, src.value);
-                            this.validateDeferStmt(res);
-                            break;
-                        }
-                        case 'Throw' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asThrow(data.span, src.value);
-                            this.validateThrowStmt(res);
-                            break;
-                        }
-                    }
-                } else {
-                    switch (stmt.getCtrlflow()!.kind) {
-                        case 'return' : {
-                            this.validateReturnStmt(stmt.getCtrlflow()!);
-                            break;
-                        }
-                        case 'defer' : {
-                            this.validateDeferStmt(stmt.getCtrlflow()!);
-                            break;
-                        }
-                        case 'throw' : {
-                            this.validateThrowStmt(stmt.getCtrlflow()!);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            validateReturnStmt(returnNode: AST.ControlFlowStmtNode): void {
+            validateReturnStmt(returnNode: AST.ReturnStmtNode): void {
                 this.log('symbols', 'Validating return statement');
 
                 this.stats.returnsValidated++;
@@ -995,17 +1012,17 @@
 
                 const isInFunction = this.isInsideFunctionScope();
 
-                if (returnNode.value) {
-                    const isConstructor = this.typeInference.isConstructorExpression(returnNode.value);
+                if (returnNode.expr) {
+                    const isConstructor = this.typeInference.isConstructorExpression(returnNode.expr);
 
-                    if (!isConstructor && this.typeInference.isTypeExpression(returnNode.value)) {
+                    if (!isConstructor && this.typeInference.isTypeExpression(returnNode.expr)) {
                         const functionReturnsType = this.currentFunctionReturnType && this.typeInference.isTypeType(this.currentFunctionReturnType);
 
                         if (!functionReturnsType) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
                                 `Cannot return a type as a value. Expected a value of type '${this.currentFunctionReturnType ? this.typeInference.getTypeDisplayName(this.currentFunctionReturnType!) : 'void'}', got type expression`,
-                                returnNode.value.span
+                                returnNode.expr.span
                             );
                             return;
                         }
@@ -1014,7 +1031,7 @@
                     // Unified character literal validation for returns
                     if (isInFunction && this.currentFunctionReturnType) {
                         if (!this.validateTypeAssignment(
-                            returnNode.value,
+                            returnNode.expr,
                             this.currentFunctionReturnType,
                             'Return value'
                         )) {
@@ -1022,7 +1039,7 @@
                         }
                     }
 
-                    const returnType = this.typeInference.inferExpressionType(returnNode.value);
+                    const returnType = this.typeInference.inferExpressionType(returnNode.expr);
 
                     if (!returnType && this.config.services.diagnosticManager.hasErrors()) {
                         return;
@@ -1030,15 +1047,15 @@
 
                     if (isInFunction && this.currentFunctionReturnType) {
                         // PASS SOURCE EXPRESSION for strict pointer checking
-                        if (returnType && !this.typeInference.isTypeCompatible(this.currentFunctionReturnType, returnType, returnNode.value)) {
+                        if (returnType && !this.typeInference.isTypeCompatible(this.currentFunctionReturnType, returnType, returnNode.expr)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
                                 `Return type '${this.typeInference.getTypeDisplayName(returnType)}' doesn't match function return type '${this.typeInference.getTypeDisplayName(this.currentFunctionReturnType)}'`,
-                                returnNode.value.span
+                                returnNode.expr.span
                             );
                         }
                     } else if (!isInFunction) {
-                        this.validateFunctionScope(returnNode, 'Return');
+                        this.validateFunctionScope(returnNode, 'return');
                     }
                 } else {
                     if (isInFunction && this.currentFunctionReturnType && !this.currentFunctionReturnType.isVoid()) {
@@ -1048,26 +1065,26 @@
                             returnNode.span
                         );
                     } else if (!isInFunction) {
-                        this.validateFunctionScope(returnNode, 'Return');
+                        this.validateFunctionScope(returnNode, 'return');
                     }
                 }
             }
 
-            validateDeferStmt(deferNode: AST.ControlFlowStmtNode): void {
-                if (deferNode.value) {
-                    this.typeInference.inferExpressionType(deferNode.value);
+            validateDeferStmt(deferNode: AST.DeferStmtNode): void {
+                if (deferNode.expr) {
+                    this.typeInference.inferExpressionType(deferNode.expr);
                 }
-                this.validateFunctionScope(deferNode, 'Defer');
+                this.validateFunctionScope(deferNode, 'defer');
             }
 
-            validateThrowStmt(throwNode: AST.ControlFlowStmtNode): void {
+            validateThrowStmt(throwNode: AST.ThrowStmtNode): void {
                 this.log('symbols', 'Validating throw statement');
 
                 // Mark that we encountered a throw statement
                 this.hasThrowStatement = true;
 
                 // Check if we're in a function scope
-                if (!this.validateFunctionScope(throwNode, 'Throw')) {
+                if (!this.validateFunctionScope(throwNode, 'throw')) {
                     return;
                 }
 
@@ -1084,20 +1101,20 @@
                 }
 
                 // Validate the thrown expression
-                if (throwNode.value) {
+                if (throwNode.expr) {
                     // TRY to infer type, but don't fail if we can't
-                    const thrownType = this.typeInference.inferExpressionType(throwNode.value);
+                    const thrownType = this.typeInference.inferExpressionType(throwNode.expr);
 
                     // For error members, we might not get a full type
                     // Instead, validate directly using the expression
                     if (!thrownType) {
                         // Can't infer type - validate using expression directly
-                        this.validateThrowExpression(throwNode.value, functionErrorType, throwNode.value.span);
+                        this.validateThrowExpression(throwNode.expr, functionErrorType, throwNode.expr.span);
                         return;
                     }
 
                     // Normal path: validate with both type and expression
-                    this.validateThrowType(thrownType, functionErrorType, throwNode.value, throwNode.value.span);
+                    this.validateThrowType(thrownType, functionErrorType, throwNode.expr, throwNode.expr.span);
                 } else {
                     this.reportError(
                         DiagCode.ANALYSIS_ERROR,
@@ -1177,14 +1194,14 @@
 
             isValidErrorExpression(expr: AST.ExprNode, expectedType: AST.TypeNode): boolean {
                 // For member access: ErrorSet.Member
-                if (expr.is('Postfix')) {
+                if (expr.is('postfix')) {
                     const postfix = expr.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const memberAccess = postfix.getMemberAccess()!;
 
-                        if (memberAccess.base.is('Primary')) {
+                        if (memberAccess.base.is('primary')) {
                             const primary = memberAccess.base.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const ident = primary.getIdent()!;
 
                                 // Check if base matches expected type name
@@ -1205,9 +1222,9 @@
                 }
 
                 // For direct identifier: check if it matches expected error variable
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent()!;
 
                         // Check if identifier matches expected type name
@@ -1247,9 +1264,9 @@
                     case 'err-ident':
                     case 'err-group': {
                         // Quick check: if throwing an identifier, check if it matches the function's expected error type
-                        if (throwExpr.is('Primary')) {
+                        if (throwExpr.is('primary')) {
                             const primary = throwExpr.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const thrownIdent = primary.getIdent()!.name;
 
                                 // Check if function expects an identifier type
@@ -1268,9 +1285,9 @@
                         let thrownErrorSet: AST.TypeNode | null = null;
 
                         // If throwing an identifier (like MyError), look up what it refers to
-                        if (throwExpr.is('Primary')) {
+                        if (throwExpr.is('primary')) {
                             const primary = throwExpr.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const thrownIdent = primary.getIdent()!.name;
                                 thrownErrorName = thrownIdent;
 
@@ -1283,9 +1300,9 @@
                         }
 
                         // If throwing a member access (like FileErrors.NotFound)
-                        if (throwExpr.is('Postfix')) {
+                        if (throwExpr.is('postfix')) {
                             const postfix = throwExpr.getPostfix();
-                            if (postfix?.kind === 'MemberAccess') {
+                            if (postfix?.kind === 'memberAccess') {
                                 const memberAccess = postfix.getMemberAccess()!;
                                 thrownErrorName = this.typeInference.extractMemberName(memberAccess.target) || '';
 
@@ -1422,29 +1439,29 @@
 
             extractErrorMemberName(thrownExpr: AST.ExprNode): string | null {
                 // Handle direct identifier: throw IOError
-                if (thrownExpr.is('Primary')) {
+                if (thrownExpr.is('primary')) {
                     const primary = thrownExpr.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         return primary.getIdent()!.name;
                     }
                 }
 
                 // Handle member access: throw selferr.IOError
-                if (thrownExpr.is('Postfix')) {
+                if (thrownExpr.is('postfix')) {
                     const postfix = thrownExpr.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const memberAccess = postfix.getMemberAccess()!;
 
                         // Check if base is 'selferr'
-                        if (memberAccess.base.is('Primary')) {
+                        if (memberAccess.base.is('primary')) {
                             const primary = memberAccess.base.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const ident = primary.getIdent();
                                 if (ident?.name === 'selferr') {
                                     // Extract the member name (the error variant)
-                                    if (memberAccess.target.is('Primary')) {
+                                    if (memberAccess.target.is('primary')) {
                                         const targetPrimary = memberAccess.target.getPrimary();
-                                        if (targetPrimary?.is('Ident')) {
+                                        if (targetPrimary?.is('ident')) {
                                             return targetPrimary.getIdent()!.name;
                                         }
                                     }
@@ -1645,14 +1662,14 @@
             }
 
             validateAssignment(binary: AST.BinaryNode): void {
-                if (binary.kind !== 'Assignment') return;
+                if (binary.kind !== 'assignment') return;
 
                 this.stats.assignmentsValidated++;
 
                 // Check for assignment through immutable pointer dereference
-                if (binary.left.is('Postfix')) {
+                if (binary.left.is('postfix')) {
                     const postfix = binary.left.getPostfix();
-                    if (postfix?.kind === 'Dereference') {
+                    if (postfix?.kind === 'dereference') {
                         const ptrExpr = postfix.getAsExprNode()!;
                         const ptrType = this.typeInference.inferExpressionType(ptrExpr);
 
@@ -1702,9 +1719,9 @@
 
             validateUnreachableExpression(expr: AST.ExprNode): void {
                 // Check if this is an unreachable expression
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.kind === 'Unreachable') {
+                    if (primary?.kind === 'unreachable') {
                         // Check if we're in an appropriate context
                         const isInAppropriateContext = this.isInAppropriateUnreachableContext(expr);
                         if (!isInAppropriateContext) {
@@ -1991,9 +2008,9 @@
             }
 
             evaluateConstantExpression(expr: AST.ExprNode): number | null {
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.is('Literal')) {
+                    if (primary?.is('literal')) {
                         const literal = primary.getLiteral();
                         if (literal?.kind === 'Integer') {
                             try {
@@ -2296,9 +2313,9 @@
                                     }
 
                                     // NEW: Check if initializer is an enum variant that requires a value
-                                    if (field.initializer.is('Postfix')) {
+                                    if (field.initializer.is('postfix')) {
                                         const postfix = field.initializer.getPostfix();
-                                        if (postfix?.kind === 'MemberAccess') {
+                                        if (postfix?.kind === 'memberAccess') {
                                             const access = postfix.getMemberAccess()!;
                                             const baseType = this.typeInference.inferExpressionType(access.base);
 
@@ -2885,18 +2902,18 @@
         // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             extractTypeFromInitializer(expr: AST.ExprNode): AST.TypeNode | null {
-                if (expr.kind !== 'Primary') return null;
+                if (expr.kind !== 'primary') return null;
 
                 const primary = expr.getPrimary();
-                if (!primary || primary.kind !== 'Type') return null;
+                if (!primary || primary.kind !== 'type') return null;
 
                 return primary.getType();
             }
 
             extractSymbolFromExpression(expr: AST.ExprNode): Symbol | null {
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent();
                         if (ident) {
                             return this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -2907,17 +2924,17 @@
             }
 
             extractBuiltinName(expr: AST.ExprNode): string | null {
-                if (expr.kind !== 'Primary') return null;
+                if (expr.kind !== 'primary') return null;
                 const primary = expr.getPrimary();
-                if (!primary || primary.kind !== 'Ident') return null;
+                if (!primary || primary.kind !== 'ident') return null;
                 const ident = primary.getIdent();
                 return (ident?.name ? '@'+ident.name : null) || null;
             }
 
             extractEnumVariantName(expr: AST.ExprNode): string | null {
-                if (expr.is('Postfix')) {
+                if (expr.is('postfix')) {
                     const postfix = expr.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const access = postfix.getMemberAccess()!;
                         return this.typeInference.extractMemberName(access.target);
                     }
@@ -2950,22 +2967,22 @@
 
             private statementAlwaysExits(stmt: AST.StmtNode): boolean {
                 switch (stmt.kind) {
-                    case 'Return':
-                    case 'Throw':
+                    case 'return':
+                    case 'throw':
                         return true;
 
-                    case 'Expression': {
+                    case 'expression': {
                         const expr = stmt.getExpr();
-                        if (expr?.is('Primary')) {
+                        if (expr?.is('primary')) {
                             const primary = expr.getPrimary();
-                            if (primary?.kind === 'Unreachable') {
+                            if (primary?.kind === 'unreachable') {
                                 return true;
                             }
                         }
                         return false;
                     }
 
-                    case 'Block': {
+                    case 'block': {
                         const block = stmt.getBlock?.();
                         if (block) {
                             return this.blockAlwaysExits(block);
@@ -2973,9 +2990,9 @@
                         return false;
                     }
 
-                    case 'While':
-                    case 'Do':
-                    case 'For':
+                    case 'while':
+                    case 'do':
+                    case 'for':
                         // Loops don't guarantee exit (might not execute or might break)
                         return false;
 
@@ -3076,7 +3093,6 @@
                 };
             }
 
-            // Common validation helpers
             validateTypeCompatibility(
                 target: AST.TypeNode,
                 source: AST.TypeNode,
@@ -3155,7 +3171,6 @@
                 this.log('symbols', `${action} '${symbolName}'`);
             }
 
-            // Helper method to eliminate symbol validation duplication
             handleStatement(
                 stmt: any,
                 validator: (stmt: any) => void,

@@ -393,7 +393,7 @@
                 const importedModules = new Set<string>();
 
                 for (const stmt of module.statements) {
-                    if (stmt.kind === 'Use') {
+                    if (stmt.kind === 'use') {
                         const useNode = stmt.getUse()!;
                         if (useNode.path) {
                             const importedModule = this.findModuleByPath(useNode.path);
@@ -424,7 +424,7 @@
                 if (!module) return false;
 
                 for (const stmt of module.statements) {
-                    if (stmt.kind === 'Use') {
+                    if (stmt.kind === 'use') {
                         const useNode = stmt.getUse()!;
                         if (useNode.path) {
                             const importedModule = this.findModuleByPath(useNode.path);

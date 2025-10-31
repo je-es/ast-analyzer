@@ -975,9 +975,6 @@ var DebugManager = class {
   // └────────────────────────────────────────────────────────────────────┘
 };
 
-// lib/components/ScopeManager.ts
-var AST = __toESM(require("@je-es/ast"));
-
 // lib/components/IdGenerator.ts
 var IdGenerator = class {
   constructor() {
@@ -1000,27 +997,27 @@ var ScopeKind = /* @__PURE__ */ ((ScopeKind2) => {
   ScopeKind2["Module"] = "Module";
   ScopeKind2["Function"] = "Function";
   ScopeKind2["Loop"] = "Loop";
-  ScopeKind2["Block"] = "Block";
-  ScopeKind2["Expression"] = "Expression";
-  ScopeKind2["Type"] = "Type";
+  ScopeKind2["Block"] = "block";
+  ScopeKind2["Expression"] = "expression";
+  ScopeKind2["Type"] = "type";
   return ScopeKind2;
 })(ScopeKind || {});
 var SymbolKind = /* @__PURE__ */ ((SymbolKind2) => {
-  SymbolKind2["Use"] = "Use";
+  SymbolKind2["Use"] = "use";
   SymbolKind2["Definition"] = "Definition";
   SymbolKind2["Variable"] = "Variable";
   SymbolKind2["Function"] = "Function";
   SymbolKind2["Parameter"] = "Parameter";
   SymbolKind2["StructField"] = "StructField";
   SymbolKind2["EnumVariant"] = "EnumVariant";
-  SymbolKind2["Type"] = "Type";
+  SymbolKind2["Type"] = "type";
   SymbolKind2["Error"] = "Error";
   return SymbolKind2;
 })(SymbolKind || {});
 var ScopeManager = class {
-  constructor(diagnosticManager, debugManager) {
-    this.diagnosticManager = diagnosticManager;
+  constructor(debugManager, builtin) {
     this.debugManager = debugManager;
+    this.builtin = builtin;
     this.idGenerator = new IdGenerator();
     this.symbolIdGenerator = new IdGenerator();
     this.init();
@@ -1245,38 +1242,20 @@ var ScopeManager = class {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
   initializeBuiltins() {
-    this.createBuiltinSymbol("Function" /* Function */, "@print", {
-      type: AST.TypeNode.asFunction({ start: 0, end: 0 }, [
-        AST.TypeNode.asU8Array({ start: 0, end: 0 })
-      ], AST.TypeNode.asVoid({ start: 0, end: 0 })),
-      callable: true
-    });
-    this.createBuiltinSymbol("Function" /* Function */, "@i", {
-      type: AST.TypeNode.asFunction({ start: 0, end: 0 }, [
-        AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)
-      ], AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)),
-      callable: true,
-      metadata: {
-        isLoopIndexFunction: true,
-        hasOptionalParameter: true,
-        defaultParameterValue: 0
-      }
-    });
-    this.createBuiltinSymbol("Definition" /* Definition */, "slice", {
-      type: AST.TypeNode.asU8Array({ start: 0, end: 0 })
-    });
-    this.createBuiltinSymbol("Definition" /* Definition */, "char", {
-      type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "u8", 8)
-    });
-    this.createBuiltinSymbol("Definition" /* Definition */, "cpoint", {
-      type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "u21", 21)
-    });
-    this.createBuiltinSymbol("Definition" /* Definition */, "usize", {
-      type: AST.TypeNode.asUnsigned({ start: 0, end: 0 }, "usize", 64)
-    });
-    this.createBuiltinSymbol("Definition" /* Definition */, "isize", {
-      type: AST.TypeNode.asSigned({ start: 0, end: 0 }, "isize", 64)
-    });
+    for (const T of this.builtin.types) {
+      this.createBuiltinSymbol("type" /* Type */, T.name, {
+        type: T.type,
+        callable: T.callable,
+        metadata: T.metadata
+      });
+    }
+    for (const F of this.builtin.functions) {
+      this.createBuiltinSymbol("Function" /* Function */, F.name, {
+        type: F.type,
+        callable: F.callable,
+        metadata: F.metadata
+      });
+    }
   }
   createBuiltinSymbol(kind, name, options) {
     const symbol = {
@@ -1366,7 +1345,7 @@ var ScopeManager = class {
       }
       for (const childId of currentModuleScope.children) {
         const childScope = this.getScope(childId);
-        if (childScope.kind === "Type" /* Type */ && childScope.name === name) {
+        if (childScope.kind === "type" /* Type */ && childScope.name === name) {
           return currentModuleScope.symbols.get(name) || null;
         }
       }
@@ -1374,7 +1353,7 @@ var ScopeManager = class {
     if (this.globalScope) {
       const globalSymbol = this.globalScope.symbols.get(name);
       if (globalSymbol) {
-        if (globalSymbol.kind === "Use" /* Use */ || ((_a = globalSymbol.metadata) == null ? void 0 : _a.isBuiltin)) {
+        if (globalSymbol.kind === "use" /* Use */ || ((_a = globalSymbol.metadata) == null ? void 0 : _a.isBuiltin)) {
           return globalSymbol;
         }
       }
@@ -1446,7 +1425,7 @@ var ScopeManager = class {
       return null;
     }
     (_h = this.debugManager) == null ? void 0 : _h.log("verbose", `Found symbol: ${symbol.name} (kind: ${symbol.kind})`);
-    if (symbol.kind === "Use" /* Use */) {
+    if (symbol.kind === "use" /* Use */) {
       const isOnImportStatement = this.isPositionOnSymbolDefinition(position_span, symbol);
       if (isOnImportStatement) {
         (_i = this.debugManager) == null ? void 0 : _i.log("verbose", `Position is ON import statement, returning Use symbol`);
@@ -1480,7 +1459,7 @@ var ScopeManager = class {
   findImportAtPosition(position, scope) {
     var _a;
     for (const symbol of scope.symbols.values()) {
-      if (symbol.kind === "Use" /* Use */) {
+      if (symbol.kind === "use" /* Use */) {
         const contextSpan = symbol.contextSpan;
         if (position.start >= contextSpan.start && position.start <= contextSpan.end) {
           (_a = this.debugManager) == null ? void 0 : _a.log(
@@ -1498,7 +1477,7 @@ var ScopeManager = class {
    * Returns true if hovering on where the symbol is defined, false if hovering on usage.
    */
   isPositionOnSymbolDefinition(position, symbol) {
-    if (symbol.kind === "Use" /* Use */) {
+    if (symbol.kind === "use" /* Use */) {
       const contextSpan = symbol.contextSpan;
       const isInContext = position.start >= contextSpan.start && position.start <= contextSpan.end;
       return isInContext;
@@ -1512,7 +1491,7 @@ var ScopeManager = class {
    */
   resolveSymbolThroughImports(symbol) {
     var _a;
-    if (symbol.kind !== "Use" /* Use */) {
+    if (symbol.kind !== "use" /* Use */) {
       return symbol;
     }
     console.log(`[ScopeManager] Resolving import symbol: ${symbol.name} (alias: ${symbol.importAlias || "none"})`);
@@ -1532,13 +1511,13 @@ var ScopeManager = class {
           const searchName = originalName || symbol.name;
           console.log(`[ScopeManager] Looking for symbol "${searchName}" in source module`);
           const sourceSymbol = scope.symbols.get(searchName);
-          if (sourceSymbol && sourceSymbol.kind !== "Use" /* Use */) {
+          if (sourceSymbol && sourceSymbol.kind !== "use" /* Use */) {
             console.log(`[ScopeManager] Found source symbol: ${sourceSymbol.name} (${sourceSymbol.kind})`);
             return sourceSymbol;
           }
           console.log(`[ScopeManager] Symbol not found directly, checking all exported symbols`);
           for (const [name, sym] of scope.symbols.entries()) {
-            if (sym.isExported && sym.kind !== "Use" /* Use */) {
+            if (sym.isExported && sym.kind !== "use" /* Use */) {
               console.log(`[ScopeManager]   - Found exported: ${name} (${sym.kind})`);
               if (originalName === name || !originalName && name === symbol.name) {
                 return sym;
@@ -1663,7 +1642,7 @@ var ScopeManager = class {
 ScopeManager.SYMBOL_PROXIMITY_THRESHOLD = 1e3;
 
 // lib/phases/SymbolCollector.ts
-var AST2 = __toESM(require("@je-es/ast"));
+var AST = __toESM(require("@je-es/ast"));
 
 // lib/utils/PathUtils.ts
 var path = __toESM(require("path"));
@@ -1743,64 +1722,51 @@ var PathUtils = class {
 
 // lib/interfaces/PhaseBase.ts
 var PhaseBase = class {
+  // ┌──────────────────────────────── INIT ────────────────────────────────┐
   constructor(phase, config) {
     this.phase = phase;
     this.config = config;
   }
-  reportError(code, message, span) {
-    this.config.services.diagnosticManager.reportError(code, message, span);
-  }
-  reportWarning(code, message, span) {
-    this.config.services.diagnosticManager.reportWarning(code, message, span);
-  }
-  reportInfo(code, message, span) {
-    this.config.services.diagnosticManager.reportInfo(code, message, span);
-  }
-  log(kind = "verbose", message) {
-    if (this.config.services.debugManager) {
-      this.config.services.debugManager.log(kind, message);
-    }
-  }
-  /**
-   * Extract getter function for statement node based on its kind.
-   * Returns null if the statement kind is invalid or unsupported.
-   */
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── ---- ────────────────────────────────┐
   getNodeGetter(stmt) {
     switch (stmt.kind) {
-      case "Def":
-        return () => stmt.getDef();
-      case "Use":
-        return () => stmt.getUse();
-      case "Let":
-        return () => stmt.getLet();
-      case "Func":
-        return () => stmt.getFunc();
-      case "Block":
+      case "block":
         return () => stmt.getBlock();
-      case "Return":
-      case "Defer":
-      case "Throw":
-        return () => stmt.getCtrlflow();
-      case "Expression":
-        return () => stmt.getExpr();
-      case "While":
-      case "Do":
-      case "For":
-        return () => stmt.getLoop();
-      case "Break":
-        return () => stmt.getBreak();
-      case "Continue":
+      case "section":
+        return () => stmt.getSection();
+      case "def":
+        return () => stmt.getDef();
+      case "use":
+        return () => stmt.getUse();
+      case "let":
+        return () => stmt.getLet();
+      case "func":
+        return () => stmt.getFunc();
+      case "return":
+        return () => stmt.getReturn();
+      case "defer":
+        return () => stmt.getDefer();
+      case "throw":
+        return () => stmt.getThrow();
+      case "continue":
         return () => stmt.getContinue();
-      case "Test":
+      case "break":
+        return () => stmt.getBreak();
+      case "expression":
+        return () => stmt.getExpr();
+      case "while":
+        return () => stmt.getWhile();
+      case "do":
+        return () => stmt.getDo();
+      case "for":
+        return () => stmt.getFor();
+      case "test":
         return () => stmt.getTest();
       default:
         return null;
     }
   }
-  /**
-   * Process a statement by delegating to kind-specific handlers.
-   * Returns the result of the handler or null if kind is unsupported.
-  */
   processStmtByKind(stmt, handlers) {
     const getter = this.getNodeGetter(stmt);
     if (!getter) {
@@ -1824,6 +1790,23 @@ var PhaseBase = class {
     }
     return handler(node);
   }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── ---- ────────────────────────────────┐
+  reportError(code, message, span) {
+    this.config.services.diagnosticManager.reportError(code, message, span);
+  }
+  reportWarning(code, message, span) {
+    this.config.services.diagnosticManager.reportWarning(code, message, span);
+  }
+  reportInfo(code, message, span) {
+    this.config.services.diagnosticManager.reportInfo(code, message, span);
+  }
+  log(kind = "verbose", message) {
+    if (this.config.services.debugManager) {
+      this.config.services.debugManager.log(kind, message);
+    }
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
 };
 
 // lib/phases/SymbolCollector.ts
@@ -1858,6 +1841,7 @@ var SymbolCollector = class extends PhaseBase {
     } catch (error) {
       this.log("errors", `Fatal error during symbol collection: ${error}`);
       this.reportError("INTERNAL_ERROR" /* INTERNAL_ERROR */, `Fatal error during symbol collection: ${error}`);
+      console.error(error);
       return false;
     }
   }
@@ -1940,17 +1924,17 @@ var SymbolCollector = class extends PhaseBase {
       }
       const moduleScope = this.createModuleScope(moduleName, parentScope);
       for (const statement of module2.statements) {
-        if (statement.kind === "Def" || statement.kind === "Let" || statement.kind === "Func") {
+        if (statement.kind === "def" || statement.kind === "let" || statement.kind === "func") {
           this.collectStmt(statement, moduleScope, moduleName);
         }
       }
       for (const statement of module2.statements) {
-        if (statement.kind === "Use") {
+        if (statement.kind === "use") {
           this.collectStmt(statement, moduleScope, moduleName);
         }
       }
       for (const statement of module2.statements) {
-        if (statement.kind !== "Def" && statement.kind !== "Let" && statement.kind !== "Func" && statement.kind !== "Use") {
+        if (statement.kind !== "def" && statement.kind !== "let" && statement.kind !== "func" && statement.kind !== "use") {
           this.collectStmt(statement, moduleScope, moduleName);
         }
       }
@@ -1980,20 +1964,20 @@ var SymbolCollector = class extends PhaseBase {
         this.config.services.contextTracker.withSavedState(() => {
           this.config.services.contextTracker.setScope(currentScope.id);
           this.processStmtByKind(stmt, {
-            "Block": (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
-            "Test": (testNode) => this.handleTestStmt(testNode, currentScope, moduleName),
-            "Use": (useNode) => this.handleUseStmt(useNode, currentScope, moduleName),
-            "Def": (defNode) => this.handleDefStmt(defNode, currentScope, moduleName),
-            "Let": (letNode) => this.handleLetStmt(letNode, currentScope, moduleName),
-            "Func": (funcNode) => this.handleFuncStmt(funcNode, currentScope, moduleName),
-            "Expression": (exprNode) => this.collectExpr(exprNode, currentScope, moduleName),
-            // special cases
-            "While": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Do": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "For": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Return": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Defer": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Throw": () => this.handleControlflowStmt(stmt, currentScope, moduleName)
+            "section": (n) => this.collectSectionStmt(n, currentScope, moduleName),
+            "block": (n) => this.collectBlockStmt(n, currentScope, moduleName),
+            "test": (n) => this.collectTestStmt(n, currentScope, moduleName),
+            "use": (n) => this.collectUseStmt(n, currentScope, moduleName),
+            "def": (n) => this.collectDefStmt(n, currentScope, moduleName),
+            "let": (n) => this.collectLetStmt(n, currentScope, moduleName),
+            "func": (n) => this.collectFuncStmt(n, currentScope, moduleName),
+            "expression": (n) => this.collectExpr(n, currentScope, moduleName),
+            "for": (n) => this.collectForStmt(n, currentScope, moduleName),
+            "while": (n) => this.collectWhileStmt(n, currentScope, moduleName),
+            "do": (n) => this.collectDoStmt(n, currentScope, moduleName),
+            "return": (n) => this.collectReturnStmt(n, currentScope, moduleName),
+            "defer": (n) => this.collectDeferStmt(n, currentScope, moduleName),
+            "throw": (n) => this.collectThrowStmt(n, currentScope, moduleName)
           });
         });
       });
@@ -2009,11 +1993,8 @@ var SymbolCollector = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
-  handleBlockStmt(blockNode, scope, moduleName) {
-    this.collectBlockStmt(blockNode, scope, moduleName);
-  }
   createBlockScope(parentScope) {
-    const blockScope = this.config.services.scopeManager.createScope("Block" /* Block */, "block", parentScope.id);
+    const blockScope = this.config.services.scopeManager.createScope("block" /* Block */, "block", parentScope.id);
     this.incrementScopesCreated();
     this.log("scopes", `Created block scope ${blockScope.id} under parent ${parentScope.id}`);
     return blockScope;
@@ -2029,21 +2010,23 @@ var SymbolCollector = class extends PhaseBase {
       });
     });
   }
-  handleTestStmt(testNode, scope, moduleName) {
+  collectSectionStmt(sectionNode, parentScope, moduleName) {
+    for (const stmt of sectionNode.stmts) {
+      this.collectStmt(stmt, parentScope, moduleName);
+    }
+  }
+  collectTestStmt(testNode, scope, moduleName) {
     this.collectBlockStmt(testNode.block, scope, moduleName);
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.2] USE ──────────────────────────────┐
-  handleUseStmt(useNode, scope, moduleName) {
-    this.collectUseStmt(useNode, scope, moduleName);
-  }
   createUseSymbol(useNode, currentScope, moduleName, targetModuleName) {
     var _a;
     const symbolName = this.extractImportSymbolName(useNode);
     const targetSpan = useNode.alias ? useNode.alias.span : useNode.targetArr ? useNode.targetArr[useNode.targetArr.length - 1].span : useNode.span;
     const symbol = this.createBaseSymbol(
       symbolName,
-      "Use" /* Use */,
+      "use" /* Use */,
       currentScope,
       moduleName,
       useNode.span,
@@ -2142,14 +2125,14 @@ var SymbolCollector = class extends PhaseBase {
     }
     const symbolName = this.extractImportSymbolName(useNode);
     const existingImport = currentScope.symbols.get(symbolName);
-    if (existingImport && existingImport.kind === "Use" /* Use */ && existingImport.importSource === targetModuleName) {
+    if (existingImport && existingImport.kind === "use" /* Use */ && existingImport.importSource === targetModuleName) {
       this.reportWarning(
         "DUPLICATE_SYMBOL" /* DUPLICATE_SYMBOL */,
         `Symbol '${symbolName}' already imported from module '${targetModuleName}'`,
         (_c = (_b = useNode.alias) == null ? void 0 : _b.span) != null ? _c : useNode.targetArr[useNode.targetArr.length - 1].span
       );
     }
-    if (this.checkForShadowing(symbolName, currentScope, "Use" /* Use */, (_e = (_d = useNode.alias) == null ? void 0 : _d.span) != null ? _e : useNode.targetArr[useNode.targetArr.length - 1].span)) {
+    if (this.checkForShadowing(symbolName, currentScope, "use" /* Use */, (_e = (_d = useNode.alias) == null ? void 0 : _d.span) != null ? _e : useNode.targetArr[useNode.targetArr.length - 1].span)) {
       return;
     }
     const rootSymbolName = useNode.targetArr[0].name;
@@ -2177,7 +2160,7 @@ var SymbolCollector = class extends PhaseBase {
       return;
     }
     const aliasName = useNode.alias.name;
-    if (this.checkForShadowing(aliasName, currentScope, "Use" /* Use */, useNode.alias.span)) {
+    if (this.checkForShadowing(aliasName, currentScope, "use" /* Use */, useNode.alias.span)) {
       return;
     }
     const exports2 = this.getModuleExports(targetModuleName);
@@ -2190,7 +2173,7 @@ var SymbolCollector = class extends PhaseBase {
     }
     const symbol = this.createBaseSymbol(
       aliasName,
-      "Use" /* Use */,
+      "use" /* Use */,
       currentScope,
       moduleName,
       useNode.span,
@@ -2227,7 +2210,7 @@ var SymbolCollector = class extends PhaseBase {
       return;
     }
     const symbolName = this.extractImportSymbolName(useNode);
-    if (this.checkForShadowing(symbolName, currentScope, "Use" /* Use */, (_b = (_a = useNode.alias) == null ? void 0 : _a.span) != null ? _b : useNode.targetArr[0].span)) {
+    if (this.checkForShadowing(symbolName, currentScope, "use" /* Use */, (_b = (_a = useNode.alias) == null ? void 0 : _a.span) != null ? _b : useNode.targetArr[0].span)) {
       return;
     }
     const useSymbol = this.createUseSymbol(useNode, currentScope, moduleName);
@@ -2236,9 +2219,6 @@ var SymbolCollector = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.3] DEF ──────────────────────────────┐
-  handleDefStmt(defNode, scope, moduleName) {
-    this.collectDefStmt(defNode, scope, moduleName);
-  }
   createDefSymbol(defNode, scope, moduleName) {
     var _a;
     const symbol = this.createBaseSymbol(
@@ -2273,9 +2253,6 @@ var SymbolCollector = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.4] LET ──────────────────────────────┐
-  handleLetStmt(letNode, scope, moduleName) {
-    this.collectLetStmt(letNode, scope, moduleName);
-  }
   createLetSymbol(varNode, scope, moduleName) {
     var _a;
     const symbol = this.createBaseSymbol(
@@ -2337,13 +2314,13 @@ var SymbolCollector = class extends PhaseBase {
     }
   }
   extractTypeFromInitializer(expr) {
-    if (expr.kind !== "Primary") return null;
+    if (expr.kind !== "primary") return null;
     const primary = expr.getPrimary();
     if (!primary) return null;
-    if (primary.kind === "Type") {
+    if (primary.kind === "type") {
       return primary.getType();
     }
-    if (primary.kind === "Object") {
+    if (primary.kind === "object") {
       const obj = primary.getObject();
       if (!obj || !obj.ident) return null;
       const typeSymbol = this.config.services.scopeManager.lookupSymbol(obj.ident.name);
@@ -2356,9 +2333,6 @@ var SymbolCollector = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.5] FUNC ─────────────────────────────┐
-  handleFuncStmt(funcNode, scope, moduleName) {
-    this.collectFuncStmt(funcNode, scope, moduleName);
-  }
   determineErrorMode(errorType) {
     var _a, _b;
     if (errorType.isErr()) {
@@ -2449,7 +2423,7 @@ var SymbolCollector = class extends PhaseBase {
     this.trackModuleExport(moduleName, funcNode.ident.name, funcSymbol.isExported);
     const errorMode = funcNode.errorType ? this.determineErrorMode(funcNode.errorType) : void 0;
     const parentScope = this.config.services.scopeManager.getScope(scope.id);
-    const isStructMethod = parentScope.kind === "Type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
+    const isStructMethod = parentScope.kind === "type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
     this.config.services.scopeManager.withScope(funcScope.id, () => {
       this.config.services.contextTracker.withSavedState(() => {
         if (isStructMethod) {
@@ -2529,7 +2503,7 @@ var SymbolCollector = class extends PhaseBase {
     return collectedParams;
   }
   injectSelfParameter(funcScope, structScope, moduleName) {
-    const structType = AST2.TypeNode.asIdentifier(
+    const structType = AST.TypeNode.asIdentifier(
       { start: 0, end: 0 },
       structScope.name
     );
@@ -2594,134 +2568,79 @@ var SymbolCollector = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.6] LOOP ─────────────────────────────┐
-  handleLoopStmt(stmt, scope, moduleName) {
-    if (stmt.getLoop === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "While": {
-          const src = data.source;
-          const loop = AST2.LoopStmtNode.createWhile(data.span, src.expr, src.stmt);
-          this.collectLoopStmt(loop, scope, moduleName);
-          break;
-        }
-        case "Do": {
-          const src = data.source;
-          const loop = AST2.LoopStmtNode.createDo(data.span, src.expr, src.stmt);
-          this.collectLoopStmt(loop, scope, moduleName);
-          break;
-        }
-        case "For": {
-          const src = data.source;
-          const loop = AST2.LoopStmtNode.createFor(data.span, src.expr, src.stmt);
-          this.collectLoopStmt(loop, scope, moduleName);
-          break;
-        }
-      }
-    } else {
-      this.collectLoopStmt(stmt.getLoop(), scope, moduleName);
-    }
+  collectForStmt(forNode, parentScope, moduleName) {
+    const loopScope = this.createLoopScope(parentScope, "for");
+    this.config.services.scopeManager.withScope(loopScope.id, () => {
+      this.config.services.contextTracker.withSavedState(() => {
+        this.config.services.contextTracker.setScope(loopScope.id);
+        this.config.services.contextTracker.enterLoop();
+        this.collectExpr(forNode.expr, loopScope, moduleName);
+        this.collectStmt(forNode.stmt, loopScope, moduleName);
+      });
+      this.config.services.contextTracker.exitLoop();
+    });
   }
-  createLoopScope(parentScope) {
+  collectWhileStmt(whileNode, parentScope, moduleName) {
+    const loopScope = this.createLoopScope(parentScope, "while");
+    this.config.services.scopeManager.withScope(loopScope.id, () => {
+      this.config.services.contextTracker.withSavedState(() => {
+        this.config.services.contextTracker.setScope(loopScope.id);
+        this.config.services.contextTracker.enterLoop();
+        this.collectExpr(whileNode.expr, loopScope, moduleName);
+        this.collectStmt(whileNode.stmt, loopScope, moduleName);
+      });
+      this.config.services.contextTracker.exitLoop();
+    });
+  }
+  collectDoStmt(doNode, parentScope, moduleName) {
+    const loopScope = this.createLoopScope(parentScope, "do");
+    this.config.services.scopeManager.withScope(loopScope.id, () => {
+      this.config.services.contextTracker.withSavedState(() => {
+        this.config.services.contextTracker.setScope(loopScope.id);
+        this.config.services.contextTracker.enterLoop();
+        this.collectExpr(doNode.expr, loopScope, moduleName);
+        this.collectStmt(doNode.stmt, loopScope, moduleName);
+      });
+      this.config.services.contextTracker.exitLoop();
+    });
+  }
+  createLoopScope(parentScope, mode) {
     const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "loop", parentScope.id);
     this.incrementScopesCreated();
     this.log("scopes", `Created loop scope ${loopScope.id} under parent ${parentScope.id}`);
     return loopScope;
   }
-  collectLoopStmt(loopNode, parentScope, moduleName) {
-    const loopScope = this.createLoopScope(parentScope);
-    this.config.services.scopeManager.withScope(loopScope.id, () => {
-      this.config.services.contextTracker.withSavedState(() => {
-        this.config.services.contextTracker.setScope(loopScope.id);
-        this.config.services.contextTracker.enterLoop();
-        switch (loopNode.kind) {
-          case "While":
-            this.collectExpr(loopNode.expr, loopScope, moduleName);
-            this.collectStmt(loopNode.stmt, loopScope, moduleName);
-            break;
-          case "Do":
-            this.collectStmt(loopNode.stmt, loopScope, moduleName);
-            this.collectExpr(loopNode.expr, loopScope, moduleName);
-            break;
-          case "For":
-            this.collectExpr(loopNode.expr, loopScope, moduleName);
-            this.collectStmt(loopNode.stmt, loopScope, moduleName);
-            break;
-        }
-      });
-      this.config.services.contextTracker.exitLoop();
-    });
-  }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
-  handleControlflowStmt(stmt, scope, moduleName) {
-    if (stmt.getCtrlflow === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "Return": {
-          const src = data.source;
-          const res = AST2.ControlFlowStmtNode.asReturn(data.span, src.value);
-          this.collectReturnStmt(res, scope, moduleName);
-          break;
-        }
-        case "Defer": {
-          const src = data.source;
-          const res = AST2.ControlFlowStmtNode.asDefer(data.span, src.value);
-          this.collectDeferStmt(res, scope, moduleName);
-          break;
-        }
-        case "Throw": {
-          const src = data.source;
-          const res = AST2.ControlFlowStmtNode.asThrow(data.span, src.value);
-          this.collectThrowStmt(res, scope, moduleName);
-          break;
-        }
-      }
-    } else {
-      switch (stmt.getCtrlflow().kind) {
-        case "return": {
-          this.collectReturnStmt(stmt.getCtrlflow(), scope, moduleName);
-          break;
-        }
-        case "defer": {
-          this.collectDeferStmt(stmt.getCtrlflow(), scope, moduleName);
-          break;
-        }
-        case "throw": {
-          this.collectThrowStmt(stmt.getCtrlflow(), scope, moduleName);
-          break;
-        }
-      }
+  collectReturnStmt(n, scope, moduleName) {
+    if (n.expr) {
+      this.collectExpr(n.expr, scope, moduleName);
     }
   }
-  collectReturnStmt(returnNode, scope, moduleName) {
-    if (returnNode.value) {
-      this.collectExpr(returnNode.value, scope, moduleName);
+  collectDeferStmt(n, scope, moduleName) {
+    if (n.expr) {
+      this.collectExpr(n.expr, scope, moduleName);
     }
   }
-  collectDeferStmt(deferNode, scope, moduleName) {
-    if (deferNode.value) {
-      this.collectExpr(deferNode.value, scope, moduleName);
-    }
-  }
-  collectThrowStmt(throwNode, scope, moduleName) {
-    if (throwNode.value) {
-      this.collectExpr(throwNode.value, scope, moduleName);
+  collectThrowStmt(n, scope, moduleName) {
+    if (n.expr) {
+      this.collectExpr(n.expr, scope, moduleName);
     }
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── [4] EXPR Level ───────────────────────────┐
   createExprScope(parentScope) {
-    const exprScope = this.config.services.scopeManager.createScope("Expression" /* Expression */, "expr", parentScope.id);
+    const exprScope = this.config.services.scopeManager.createScope("expression" /* Expression */, "expr", parentScope.id);
     this.incrementScopesCreated();
     return exprScope;
   }
   collectExpr(expr, currentScope, moduleName) {
     let needsScope = false;
     switch (expr.kind) {
-      case "If":
-      case "Match":
-      case "Try":
-      case "Catch":
+      case "if":
+      case "match":
+      case "try":
+      case "catch":
         needsScope = true;
         break;
     }
@@ -2739,41 +2658,41 @@ var SymbolCollector = class extends PhaseBase {
   }
   processExprKind(expr, scope, moduleName) {
     switch (expr.kind) {
-      case "As":
+      case "as":
         this.handleAsExpr(expr.getAs(), scope, moduleName);
         break;
-      case "Typeof":
+      case "typeof":
         return this.processExprKind(expr.getTypeof().expr, scope, moduleName);
-      case "Sizeof":
+      case "sizeof":
         return this.processExprKind(expr.getSizeof().expr, scope, moduleName);
-      case "Orelse":
+      case "orelse":
         this.handleOrelseExpr(expr.getOrelse(), scope, moduleName);
         break;
-      case "Range":
+      case "range":
         this.handleRangeExpr(expr.getRange(), scope, moduleName);
         break;
-      case "Try":
+      case "try":
         this.handleTryExpr(expr.getTry(), scope, moduleName);
         break;
-      case "Catch":
+      case "catch":
         this.handleCatchExpr(expr.getCatch(), scope, moduleName);
         break;
-      case "If":
+      case "if":
         this.handleIfExpr(expr.getIf(), scope, moduleName);
         break;
-      case "Match":
+      case "match":
         this.handleSwitchExpr(expr.getMatch(), scope, moduleName);
         break;
-      case "Binary":
+      case "binary":
         this.handleBinaryExpr(expr.getBinary(), scope, moduleName);
         break;
-      case "Postfix":
+      case "postfix":
         this.handlePostfixExpr(expr.getPostfix(), scope, moduleName);
         break;
-      case "Prefix":
+      case "prefix":
         this.handlePrefixExpr(expr.getPrefix(), scope, moduleName);
         break;
-      case "Primary":
+      case "primary":
         this.handlePrimaryExpr(expr.getPrimary(), scope, moduleName);
         break;
     }
@@ -2820,12 +2739,12 @@ var SymbolCollector = class extends PhaseBase {
   }
   handlePostfixExpr(postfixExpr, scope, moduleName) {
     switch (postfixExpr.kind) {
-      case "Increment":
-      case "Decrement":
-      case "Dereference":
+      case "increment":
+      case "decrement":
+      case "dereference":
         this.collectExpr(postfixExpr.getAsExprNode(), scope, moduleName);
         break;
-      case "Call": {
+      case "call": {
         const callExpr = postfixExpr.getCall();
         this.collectExpr(callExpr.base, scope, moduleName);
         for (const arg of callExpr.args) {
@@ -2833,13 +2752,13 @@ var SymbolCollector = class extends PhaseBase {
         }
         break;
       }
-      case "ArrayAccess": {
+      case "arrayAccess": {
         const arrayAccess = postfixExpr.getArrayAccess();
         this.collectExpr(arrayAccess.base, scope, moduleName);
         this.collectExpr(arrayAccess.index, scope, moduleName);
         break;
       }
-      case "MemberAccess": {
+      case "memberAccess": {
         const memberAccess = postfixExpr.getMemberAccess();
         this.collectExpr(memberAccess.base, scope, moduleName);
         break;
@@ -2851,37 +2770,37 @@ var SymbolCollector = class extends PhaseBase {
   }
   handlePrimaryExpr(primaryExpr, scope, moduleName) {
     switch (primaryExpr.kind) {
-      case "Ident": {
+      case "ident": {
         const ident = primaryExpr.getIdent();
         if (ident && ident.name === "self") {
           this.validateSelfUsage(scope, ident.span);
         }
         break;
       }
-      case "Literal":
+      case "literal":
         break;
-      case "Type": {
+      case "type": {
         const type = primaryExpr.getType();
         this.collectType(type, scope, moduleName);
         break;
       }
-      case "Paren": {
+      case "paren": {
         const paren = primaryExpr.getParen();
         this.collectExpr(paren.source, scope, moduleName);
         break;
       }
-      case "Tuple": {
+      case "tuple": {
         const tuple = primaryExpr.getTuple();
         for (const expr of tuple.fields) {
           this.collectExpr(expr, scope, moduleName);
         }
         break;
       }
-      case "Object": {
+      case "object": {
         const object = primaryExpr.getObject();
         if (object.ident) {
           this.collectExpr(
-            AST2.ExprNode.asIdent(object.ident.span, object.ident.name),
+            AST.ExprNode.asIdent(object.ident.span, object.ident.name),
             scope,
             moduleName
           );
@@ -2891,7 +2810,7 @@ var SymbolCollector = class extends PhaseBase {
         }
         break;
       }
-      case "Unreachable": {
+      case "unreachable": {
         break;
       }
     }
@@ -2904,7 +2823,7 @@ var SymbolCollector = class extends PhaseBase {
     while (checkScope) {
       if (checkScope.kind === "Function" /* Function */) {
         const parentScope = checkScope.parent !== null ? this.config.services.scopeManager.getScope(checkScope.parent) : null;
-        if ((parentScope == null ? void 0 : parentScope.kind) === "Type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct") {
+        if ((parentScope == null ? void 0 : parentScope.kind) === "type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct") {
           structScope = parentScope;
           const funcSymbol = parentScope.symbols.get(checkScope.name);
           if (funcSymbol && funcSymbol.visibility.kind === "Static") {
@@ -2931,7 +2850,7 @@ var SymbolCollector = class extends PhaseBase {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── [5] Type Level ───────────────────────────┐
   createTypeScope(typeName, parentScope, typeKind) {
-    const typeScope = this.config.services.scopeManager.createScope("Type" /* Type */, typeName, parentScope.id);
+    const typeScope = this.config.services.scopeManager.createScope("type" /* Type */, typeName, parentScope.id);
     if (typeKind) {
       typeScope.metadata = __spreadProps(__spreadValues({}, typeScope.metadata), {
         typeKind
@@ -3236,8 +3155,8 @@ var SymbolCollector = class extends PhaseBase {
     }
     const existingSymbol = outer ? this.config.services.scopeManager.lookupSymbolInParentScopes(newSymbolName, currentScope.id) : currentScope.symbols.get(newSymbolName);
     if (existingSymbol) {
-      const isInTypeScope = currentScope.kind === "Type" /* Type */;
-      const existingIsInTypeScope = this.config.services.scopeManager.getScope(existingSymbol.scope).kind === "Type" /* Type */;
+      const isInTypeScope = currentScope.kind === "type" /* Type */;
+      const existingIsInTypeScope = this.config.services.scopeManager.getScope(existingSymbol.scope).kind === "type" /* Type */;
       if (isInTypeScope !== existingIsInTypeScope && outer) {
         this.log(
           "verbose",
@@ -3248,7 +3167,7 @@ var SymbolCollector = class extends PhaseBase {
       let diagnosticCode;
       let severity = "error" /* ERROR */;
       switch (newSymbolKind) {
-        case "Use" /* Use */:
+        case "use" /* Use */:
           diagnosticCode = "USE_SHADOWING" /* USE_SHADOWING */;
           break;
         case "Definition" /* Definition */:
@@ -3333,17 +3252,17 @@ var SymbolCollector = class extends PhaseBase {
   }
   validateSymbolExistsInModule(module2, symbolName) {
     for (const stmt of module2.statements) {
-      if (stmt.kind === "Let") {
+      if (stmt.kind === "let") {
         const varNode = stmt.getLet();
         if (varNode && varNode.field.ident.name === symbolName) {
           return true;
         }
-      } else if (stmt.kind === "Func") {
+      } else if (stmt.kind === "func") {
         const funcNode = stmt.getFunc();
         if (funcNode && funcNode.ident.name === symbolName) {
           return true;
         }
-      } else if (stmt.kind === "Def") {
+      } else if (stmt.kind === "def") {
         const defNode = stmt.getDef();
         if (defNode && defNode.ident.name === symbolName) {
           return true;
@@ -3378,14 +3297,13 @@ var SymbolCollector = class extends PhaseBase {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
   init() {
-    var _a;
-    this.pathContext.rootPath = (_a = this.config.program.metadata) == null ? void 0 : _a.path;
-    this.config.services.contextTracker.reset();
-    this.config.services.contextTracker.setPhase("Collection" /* Collection */);
     if (!this.config.program) {
       this.reportError("ANALYSIS_ERROR" /* ANALYSIS_ERROR */, "No program provided for analysis");
       return false;
     }
+    this.pathContext.rootPath = this.config.program.metadata.path;
+    this.config.services.contextTracker.reset();
+    this.config.services.contextTracker.setPhase("Collection" /* Collection */);
     try {
       this.config.services.scopeManager.reset();
       const globalScope = this.config.services.scopeManager.getCurrentScope();
@@ -3491,7 +3409,7 @@ var SymbolCollector = class extends PhaseBase {
 };
 
 // lib/phases/SymbolResolver.ts
-var AST3 = __toESM(require("@je-es/ast"));
+var AST2 = __toESM(require("@je-es/ast"));
 var SymbolResolver = class extends PhaseBase {
   constructor(config) {
     super("Resolution" /* Resolution */, config);
@@ -3571,7 +3489,7 @@ var SymbolResolver = class extends PhaseBase {
   }
   resetDeclaredFlags(scope) {
     for (const [_, symbol] of scope.symbols) {
-      if (symbol.kind !== "Use" /* Use */ && symbol.kind !== "Parameter" /* Parameter */) {
+      if (symbol.kind !== "use" /* Use */ && symbol.kind !== "Parameter" /* Parameter */) {
         symbol.declared = false;
       }
     }
@@ -3614,20 +3532,20 @@ var SymbolResolver = class extends PhaseBase {
         this.config.services.contextTracker.withSavedState(() => {
           this.config.services.contextTracker.setScope(currentScope.id);
           this.processStmtByKind(stmt, {
-            "Block": (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
-            "Test": (testNode) => this.handleTestStmt(testNode, currentScope, moduleName),
-            "Use": (useNode) => this.handleUseStmt(useNode, currentScope, moduleName),
-            "Def": (defNode) => this.handleDefStmt(defNode, currentScope, moduleName),
-            "Let": (letNode) => this.handleLetStmt(letNode, currentScope, moduleName),
-            "Func": (funcNode) => this.handleFuncStmt(funcNode, currentScope, moduleName),
-            "Expression": (exprNode) => this.resolveExprStmt(exprNode),
-            // special cases
-            "While": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Do": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "For": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Return": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Defer": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Throw": () => this.handleControlflowStmt(stmt, currentScope, moduleName)
+            "section": (n) => this.resolveSectionStmt(n),
+            "block": (n) => this.resolveBlockStmt(n),
+            "test": (n) => this.resolveTestStmt(n),
+            "use": (n) => this.resolveUseStmt(n),
+            "def": (n) => this.resolveDefStmt(n),
+            "let": (n) => this.resolveLetStmt(n),
+            "func": (n) => this.resolveFuncStmt(n),
+            "expression": (n) => this.resolveExprStmt(n),
+            "while": (n) => this.resolveWhileStmt(n),
+            "do": (n) => this.resolveDoStmt(n),
+            "for": (n) => this.resolveForStmt(n),
+            "return": (n) => this.resolveReturnStmt(n),
+            "defer": (n) => this.resolveDeferStmt(n),
+            "throw": (n) => this.resolveThrowStmt(n)
           });
         });
       });
@@ -3643,12 +3561,9 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
-  handleBlockStmt(blockNode, scope, moduleName) {
-    this.resolveBlockStmt(blockNode);
-  }
   resolveBlockStmt(block) {
     this.log("symbols", "Resolving block");
-    const blockScope = this.config.services.scopeManager.findChildScopeByName("block", "Block" /* Block */);
+    const blockScope = this.config.services.scopeManager.findChildScopeByName("block", "block" /* Block */);
     if (blockScope) {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.contextTracker.setScope(blockScope.id);
@@ -3660,14 +3575,16 @@ var SymbolResolver = class extends PhaseBase {
       });
     }
   }
-  handleTestStmt(testNode, scope, moduleName) {
+  resolveSectionStmt(section) {
+    for (const stmt of section.stmts) {
+      this.resolveStmt(stmt, this.config.services.scopeManager.getCurrentScope());
+    }
+  }
+  resolveTestStmt(testNode, scope, moduleName) {
     this.resolveBlockStmt(testNode.block);
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.2] USE ──────────────────────────────┐
-  handleUseStmt(useNode, scope, moduleName) {
-    this.resolveUseStmt(useNode);
-  }
   resolveUseStmt(useNode) {
     this.log("symbols", "Resolving use statement");
     this.config.services.contextTracker.pushContextSpan(useNode.span);
@@ -3703,7 +3620,7 @@ var SymbolResolver = class extends PhaseBase {
       }
       const symbolName2 = useNode.alias.name;
       const existingSymbol2 = this.config.services.scopeManager.getSymbolInCurrentScope(symbolName2);
-      if (!existingSymbol2 || existingSymbol2.kind !== "Use" /* Use */) {
+      if (!existingSymbol2 || existingSymbol2.kind !== "use" /* Use */) {
         return;
       }
       if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
@@ -3721,13 +3638,13 @@ var SymbolResolver = class extends PhaseBase {
         return;
       }
       existingSymbol2.declared = true;
-      existingSymbol2.type = AST3.TypeNode.asIdentifier(useNode.span, targetModuleName2);
+      existingSymbol2.type = AST2.TypeNode.asIdentifier(useNode.span, targetModuleName2);
       this.log("verbose", `Resolved wildcard import from '${targetModuleName2}' as '${symbolName2}'`);
       return;
     }
     const symbolName = useNode.alias ? useNode.alias.name : useNode.targetArr[useNode.targetArr.length - 1].name;
     const existingSymbol = this.config.services.scopeManager.getSymbolInCurrentScope(symbolName);
-    if (!existingSymbol || existingSymbol.kind !== "Use" /* Use */) {
+    if (!existingSymbol || existingSymbol.kind !== "use" /* Use */) {
       return;
     }
     if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
@@ -3790,9 +3707,9 @@ var SymbolResolver = class extends PhaseBase {
     if (nodes.length === 0) {
       throw new Error("Cannot create identifier expression from empty array");
     }
-    const base = AST3.ExprNode.asIdent(nodes[0].span, nodes[0].name, nodes[0].builtin);
+    const base = AST2.ExprNode.asIdent(nodes[0].span, nodes[0].name, nodes[0].builtin);
     if (nodes.length === 1) return base;
-    return AST3.ExprNode.asMemberAccess(nodes[0].span, base, this.identOrMemberAccess(nodes.slice(1)));
+    return AST2.ExprNode.asMemberAccess(nodes[0].span, base, this.identOrMemberAccess(nodes.slice(1)));
   }
   saveModuleContext() {
     return {
@@ -3926,9 +3843,6 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.3] DEF ──────────────────────────────┐
-  handleDefStmt(defNode, scope, moduleName) {
-    this.resolveDefStmt(defNode);
-  }
   resolveDefStmt(defNode) {
     this.log("symbols", `Resolving definition '${defNode.ident.name}'`);
     const symbol = this.config.services.scopeManager.getSymbolInCurrentScope(defNode.ident.name);
@@ -3944,9 +3858,6 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.4] LET ──────────────────────────────┐
-  handleLetStmt(letNode, scope, moduleName) {
-    this.resolveLetStmt(letNode);
-  }
   resolveLetStmt(letNode) {
     this.log("symbols", `Resolving let '${letNode.field.ident.name}'`);
     const symbol = this.config.services.scopeManager.getSymbolInCurrentScope(letNode.field.ident.name);
@@ -3971,9 +3882,9 @@ var SymbolResolver = class extends PhaseBase {
             return;
           }
         }
-      } else if (letNode.field.initializer.kind === "Primary") {
+      } else if (letNode.field.initializer.kind === "primary") {
         const primary = letNode.field.initializer.getPrimary();
-        if (primary && primary.kind === "Type") {
+        if (primary && primary.kind === "type") {
           const anonType = primary.getType();
           this.resolveType(anonType, symbol);
           symbol.type = anonType;
@@ -3991,11 +3902,11 @@ var SymbolResolver = class extends PhaseBase {
     this.stats.resolvedSymbols++;
   }
   isConstructorExpression(expr) {
-    if (expr.kind !== "Primary") {
+    if (expr.kind !== "primary") {
       return false;
     }
     const primary = expr.getPrimary();
-    if (!primary || primary.kind !== "Object") {
+    if (!primary || primary.kind !== "object") {
       return false;
     }
     const obj = primary.getObject();
@@ -4058,9 +3969,6 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.5] FUNC ─────────────────────────────┐
-  handleFuncStmt(funcNode, scope, moduleName) {
-    this.resolveFuncStmt(funcNode);
-  }
   resolveFuncStmt(funcNode) {
     var _a, _b;
     this.log("symbols", `Resolving function '${funcNode.ident.name}'`);
@@ -4092,12 +4000,12 @@ var SymbolResolver = class extends PhaseBase {
     funcSymbol.declared = true;
     const funcSymbolScope = this.config.services.scopeManager.getScope(funcSymbol.scope);
     const parentScope = funcSymbolScope.parent !== null ? this.config.services.scopeManager.getScope(funcSymbolScope.parent) : null;
-    const isStaticMethod = (parentScope == null ? void 0 : parentScope.kind) === "Type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" && funcNode.visibility.kind === "Static";
+    const isStaticMethod = (parentScope == null ? void 0 : parentScope.kind) === "type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" && funcNode.visibility.kind === "Static";
     const previousIsStaticMethod = this.currentIsStaticMethod;
     const previousStructScope = this.currentStructScope;
     this.currentIsStaticMethod = isStaticMethod;
     this.currentStructScope = isStaticMethod ? parentScope : null;
-    const isStructMethod = (parentScope == null ? void 0 : parentScope.kind) === "Type" /* Type */ && ((_b = parentScope.metadata) == null ? void 0 : _b.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
+    const isStructMethod = (parentScope == null ? void 0 : parentScope.kind) === "type" /* Type */ && ((_b = parentScope.metadata) == null ? void 0 : _b.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
     try {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(funcScope.id, () => {
@@ -4131,7 +4039,7 @@ var SymbolResolver = class extends PhaseBase {
                   `Cannot infer type for parameter '${param.ident.name}'`,
                   param.span
                 );
-                paramTypes.push(AST3.TypeNode.asUndefined(param.span));
+                paramTypes.push(AST2.TypeNode.asUndefined(param.span));
               }
             }
           }
@@ -4207,10 +4115,10 @@ var SymbolResolver = class extends PhaseBase {
               }
             }
           }
-          funcSymbol.type = AST3.TypeNode.asFunction(
+          funcSymbol.type = AST2.TypeNode.asFunction(
             funcNode.span,
             paramTypes,
-            returnType || AST3.TypeNode.asVoid(funcNode.span),
+            returnType || AST2.TypeNode.asVoid(funcNode.span),
             funcNode.errorType
           );
           if (funcNode.body) {
@@ -4340,118 +4248,71 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.6] LOOP ─────────────────────────────┐
-  handleLoopStmt(stmt, scope, moduleName) {
-    if (stmt.getLoop === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "While": {
-          const src = data.source;
-          const loop = AST3.LoopStmtNode.createWhile(data.span, src.expr, src.stmt);
-          this.resolveLoopStmt(loop);
-          break;
-        }
-        case "Do": {
-          const src = data.source;
-          const loop = AST3.LoopStmtNode.createDo(data.span, src.expr, src.stmt);
-          this.resolveLoopStmt(loop);
-          break;
-        }
-        case "For": {
-          const src = data.source;
-          const loop = AST3.LoopStmtNode.createFor(data.span, src.expr, src.stmt);
-          this.resolveLoopStmt(loop);
-          break;
-        }
-      }
-    } else {
-      this.resolveLoopStmt(stmt.getLoop());
-    }
-  }
-  resolveLoopStmt(loopStmt) {
-    this.log("symbols", "Resolving loop statement");
+  resolveWhileStmt(n) {
+    this.log("symbols", "Resolving while statement");
     const currentScope = this.config.services.scopeManager.getCurrentScope();
-    const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "loop", currentScope.id);
+    const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "while", currentScope.id);
     this.config.services.contextTracker.withSavedState(() => {
       this.config.services.contextTracker.setScope(loopScope.id);
       this.config.services.contextTracker.enterLoop();
       this.config.services.scopeManager.withScope(loopScope.id, () => {
-        if (loopStmt.kind === "While") {
-          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-        } else if (loopStmt.kind === "Do") {
-          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-        } else if (loopStmt.kind === "For") {
-          if (loopStmt.expr) this.resolveExprStmt(loopStmt.expr);
-          if (loopStmt.stmt) this.resolveStmt(loopStmt.stmt, loopScope);
-        }
+        if (n.expr) this.resolveExprStmt(n.expr);
+        if (n.stmt) this.resolveStmt(n.stmt, loopScope);
+      });
+    });
+    this.config.services.contextTracker.exitLoop();
+  }
+  resolveDoStmt(n) {
+    this.log("symbols", "Resolving do statement");
+    const currentScope = this.config.services.scopeManager.getCurrentScope();
+    const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "do", currentScope.id);
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.contextTracker.setScope(loopScope.id);
+      this.config.services.contextTracker.enterLoop();
+      this.config.services.scopeManager.withScope(loopScope.id, () => {
+        if (n.expr) this.resolveExprStmt(n.expr);
+        if (n.stmt) this.resolveStmt(n.stmt, loopScope);
+      });
+    });
+    this.config.services.contextTracker.exitLoop();
+  }
+  resolveForStmt(n) {
+    this.log("symbols", "Resolving for statement");
+    const currentScope = this.config.services.scopeManager.getCurrentScope();
+    const loopScope = this.config.services.scopeManager.createScope("Loop" /* Loop */, "for", currentScope.id);
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.contextTracker.setScope(loopScope.id);
+      this.config.services.contextTracker.enterLoop();
+      this.config.services.scopeManager.withScope(loopScope.id, () => {
+        if (n.expr) this.resolveExprStmt(n.expr);
+        if (n.stmt) this.resolveStmt(n.stmt, loopScope);
       });
     });
     this.config.services.contextTracker.exitLoop();
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
-  handleControlflowStmt(stmt, scope, moduleName) {
-    if (stmt.getCtrlflow === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "Return": {
-          const src = data.source;
-          const res = AST3.ControlFlowStmtNode.asReturn(data.span, src.value);
-          this.resolveReturnStmt(res);
-          break;
-        }
-        case "Defer": {
-          const src = data.source;
-          const res = AST3.ControlFlowStmtNode.asDefer(data.span, src.value);
-          this.resolveDeferStmt(res);
-          break;
-        }
-        case "Throw": {
-          const src = data.source;
-          const res = AST3.ControlFlowStmtNode.asThrow(data.span, src.value);
-          this.resolveThrowStmt(res);
-          break;
-        }
-      }
-    } else {
-      switch (stmt.getCtrlflow().kind) {
-        case "return": {
-          this.resolveReturnStmt(stmt.getCtrlflow());
-          break;
-        }
-        case "defer": {
-          this.resolveDeferStmt(stmt.getCtrlflow());
-          break;
-        }
-        case "throw": {
-          this.resolveThrowStmt(stmt.getCtrlflow());
-          break;
-        }
-      }
-    }
-  }
   resolveReturnStmt(returnNode) {
     this.log("symbols", "Resolving return statement");
-    if (returnNode.value) {
-      this.config.services.contextTracker.enterExpression("ReturnExpression" /* ReturnExpression */, returnNode.value.span);
-      this.resolveExprStmt(returnNode.value);
+    if (returnNode.expr) {
+      this.config.services.contextTracker.enterExpression("ReturnExpression" /* ReturnExpression */, returnNode.expr.span);
+      this.resolveExprStmt(returnNode.expr);
       this.config.services.contextTracker.exitExpression();
     }
   }
   resolveDeferStmt(deferNode) {
     this.log("symbols", "Resolving defer statement");
-    if (deferNode.value) {
-      this.config.services.contextTracker.enterExpression("DeferExpression" /* DeferExpression */, deferNode.value.span);
-      this.resolveExprStmt(deferNode.value);
+    if (deferNode.expr) {
+      this.config.services.contextTracker.enterExpression("DeferExpression" /* DeferExpression */, deferNode.expr.span);
+      this.resolveExprStmt(deferNode.expr);
       this.config.services.contextTracker.exitExpression();
     }
   }
   resolveThrowStmt(throwNode) {
     this.log("symbols", "Resolving throw statement");
-    if (throwNode.value) {
-      this.config.services.contextTracker.enterExpression("ThrowExpression" /* ThrowExpression */, throwNode.value.span);
-      this.resolveExprStmt(throwNode.value);
+    if (throwNode.expr) {
+      this.config.services.contextTracker.enterExpression("ThrowExpression" /* ThrowExpression */, throwNode.expr.span);
+      this.resolveExprStmt(throwNode.expr);
       this.config.services.contextTracker.exitExpression();
     }
   }
@@ -4463,41 +4324,41 @@ var SymbolResolver = class extends PhaseBase {
     this.config.services.contextTracker.pushContextSpan(expr.span);
     try {
       switch (expr.kind) {
-        case "Primary":
+        case "primary":
           this.resolvePrimary(expr.getPrimary(), contextSpan, parameterContext, symbol);
           break;
-        case "Binary":
+        case "binary":
           this.resolveBinary(expr.getBinary(), contextSpan, parameterContext);
           break;
-        case "Prefix":
+        case "prefix":
           this.resolvePrefix(expr.getPrefix(), contextSpan, parameterContext);
           break;
-        case "Postfix":
+        case "postfix":
           this.resolvePostfix(expr.getPostfix(), contextSpan, parameterContext);
           break;
-        case "As":
+        case "as":
           this.resolveAs(expr.getAs(), contextSpan, parameterContext);
           break;
-        case "Typeof":
+        case "typeof":
           return this.resolveExprStmt(expr.getTypeof().expr, contextSpan, parameterContext);
-        case "Sizeof":
+        case "sizeof":
           return this.resolveExprStmt(expr.getSizeof().expr, contextSpan, parameterContext);
-        case "Orelse":
+        case "orelse":
           this.resolveOrelse(expr.getOrelse(), contextSpan, parameterContext);
           break;
-        case "Range":
+        case "range":
           this.resolveRange(expr.getRange(), contextSpan, parameterContext);
           break;
-        case "Try":
+        case "try":
           this.resolveTry(expr.getTry(), contextSpan, parameterContext);
           break;
-        case "Catch":
+        case "catch":
           this.resolveCatch(expr.getCatch(), contextSpan, parameterContext);
           break;
-        case "If":
+        case "if":
           this.resolveIf(expr.getIf(), contextSpan, parameterContext);
           break;
-        case "Match":
+        case "match":
           this.resolveSwitch(expr.getMatch(), contextSpan, parameterContext);
           break;
         default:
@@ -4511,25 +4372,25 @@ var SymbolResolver = class extends PhaseBase {
   resolvePrimary(primary, contextSpan, fieldContext, symbol) {
     var _a, _b, _c, _d;
     switch (primary.kind) {
-      case "Ident":
+      case "ident":
         this.resolveIdentifier(primary.getIdent(), contextSpan, fieldContext);
         break;
-      case "Paren": {
+      case "paren": {
         const paren = primary.getParen();
         if (paren.source) {
           this.resolveExprStmt(paren.source, contextSpan, fieldContext, symbol);
         }
         break;
       }
-      case "Literal":
+      case "literal":
         break;
-      case "Tuple":
+      case "tuple":
         this.resolveTuple(primary.getTuple(), contextSpan, fieldContext);
         break;
-      case "Object":
+      case "object":
         this.resolveObject(primary.getObject(), contextSpan, fieldContext);
         break;
-      case "Type": {
+      case "type": {
         const type = primary.getType();
         const tempSymbol = {
           id: -1,
@@ -4549,7 +4410,7 @@ var SymbolResolver = class extends PhaseBase {
         this.resolveType(type, tempSymbol, contextSpan);
         break;
       }
-      case "Unreachable": {
+      case "unreachable": {
         break;
       }
       default:
@@ -4585,18 +4446,18 @@ var SymbolResolver = class extends PhaseBase {
   }
   resolvePostfix(postfix, contextSpan, parameterContext) {
     switch (postfix.kind) {
-      case "Call":
+      case "call":
         this.resolvePostfixCall(postfix.getCall(), contextSpan, parameterContext);
         break;
-      case "ArrayAccess":
+      case "arrayAccess":
         this.resolvePostfixArrayAccess(postfix.getArrayAccess(), contextSpan, parameterContext);
         break;
-      case "MemberAccess":
+      case "memberAccess":
         this.resolvePostfixMemberAccess(postfix.getMemberAccess(), contextSpan, parameterContext);
         break;
-      case "Increment":
-      case "Decrement":
-      case "Dereference":
+      case "increment":
+      case "decrement":
+      case "dereference":
         this.resolveExprStmt(postfix.getAsExprNode(), contextSpan, parameterContext);
         break;
       default:
@@ -4635,9 +4496,9 @@ var SymbolResolver = class extends PhaseBase {
   }
   resolvePostfixMemberAccess(memberAccess, contextSpan, parameterContext) {
     this.log("symbols", "Resolving member access");
-    if (memberAccess.base.is("Primary")) {
+    if (memberAccess.base.is("primary")) {
       const primary = memberAccess.base.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if ((ident == null ? void 0 : ident.name) === "selferr") {
           this.resolveSelfErrMemberAccess(memberAccess);
@@ -4645,9 +4506,9 @@ var SymbolResolver = class extends PhaseBase {
         }
       }
     }
-    if (memberAccess.base.is("Primary")) {
+    if (memberAccess.base.is("primary")) {
       const primary = memberAccess.base.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if ((ident == null ? void 0 : ident.name) === "self") {
           this.resolveExprStmt(memberAccess.target, contextSpan, parameterContext);
@@ -4659,9 +4520,9 @@ var SymbolResolver = class extends PhaseBase {
     this.resolveExprStmt(memberAccess.base, contextSpan, parameterContext);
     const baseSymbol = this.findMemberAccessBaseSymbol(memberAccess.base);
     if (!baseSymbol) {
-      if (memberAccess.base.is("Primary")) {
+      if (memberAccess.base.is("primary")) {
         const primary = memberAccess.base.getPrimary();
-        if (primary == null ? void 0 : primary.is("Ident")) {
+        if (primary == null ? void 0 : primary.is("ident")) {
           const ident = primary.getIdent();
           if ((ident == null ? void 0 : ident.name) === "self" && this.currentIsStaticMethod) {
             this.stats.memberAccessResolved++;
@@ -4689,7 +4550,7 @@ var SymbolResolver = class extends PhaseBase {
       );
       return;
     }
-    if (!memberAccess.target.is("Primary")) {
+    if (!memberAccess.target.is("primary")) {
       this.reportError(
         "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
         "Expected error member name after selferr",
@@ -4698,7 +4559,7 @@ var SymbolResolver = class extends PhaseBase {
       return;
     }
     const targetPrimary = memberAccess.target.getPrimary();
-    if (!(targetPrimary == null ? void 0 : targetPrimary.is("Ident"))) {
+    if (!(targetPrimary == null ? void 0 : targetPrimary.is("ident"))) {
       this.reportError(
         "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
         "Expected error member name after selferr",
@@ -4731,25 +4592,25 @@ var SymbolResolver = class extends PhaseBase {
     this.log("symbols", `Resolved selferr.${errorMemberName}`);
   }
   findMemberAccessBaseSymbol(baseExpr) {
-    if (baseExpr.kind === "Primary") {
+    if (baseExpr.kind === "primary") {
       const primary = baseExpr.getPrimary();
-      if (primary && primary.kind === "Ident") {
+      if (primary && primary.kind === "ident") {
         const ident = primary.getIdent();
         if (ident) {
           return this.config.services.scopeManager.lookupSymbol(ident.name);
         }
       }
     }
-    if (baseExpr.kind === "Postfix") {
+    if (baseExpr.kind === "postfix") {
       const postfix = baseExpr.getPostfix();
       if (!postfix) return null;
-      if (postfix.kind === "Dereference") {
+      if (postfix.kind === "dereference") {
         const derefExpr = postfix.getAsExprNode();
         if (derefExpr) {
           return this.findMemberAccessBaseSymbol(derefExpr);
         }
       }
-      if (postfix.kind === "MemberAccess") {
+      if (postfix.kind === "memberAccess") {
         const member = postfix.getMemberAccess();
         return this.findMemberAccessBaseSymbol(member.base);
       }
@@ -4768,7 +4629,7 @@ var SymbolResolver = class extends PhaseBase {
       return;
     }
     const parentScope = this.config.services.scopeManager.getScopeParent(currentScope.id);
-    if (!parentScope || parentScope.kind !== "Type" /* Type */) {
+    if (!parentScope || parentScope.kind !== "type" /* Type */) {
       this.reportError("UNDEFINED_IDENTIFIER" /* UNDEFINED_IDENTIFIER */, "Cannot use 'self' outside of struct method", memberAccess.span);
       return;
     }
@@ -4827,7 +4688,7 @@ var SymbolResolver = class extends PhaseBase {
   }
   resolveCatch(catchNode, contextSpan, parameterContext) {
     this.resolveExprStmt(catchNode.leftExpr, contextSpan, parameterContext);
-    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "Expression" /* Expression */);
+    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "expression" /* Expression */);
     if (exprScope) {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.contextTracker.setScope(exprScope.id);
@@ -4867,9 +4728,9 @@ var SymbolResolver = class extends PhaseBase {
     }
   }
   findCallTargetSymbol(baseExpr) {
-    if (baseExpr.kind === "Primary") {
+    if (baseExpr.kind === "primary") {
       const primary = baseExpr.getPrimary();
-      if (primary && primary.kind === "Ident") {
+      if (primary && primary.kind === "ident") {
         const ident = primary.getIdent();
         if (ident) {
           return this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -4889,7 +4750,7 @@ var SymbolResolver = class extends PhaseBase {
         return;
       }
     }
-    if (symbol.kind === "Use" /* Use */ && symbol.importSource) {
+    if (symbol.kind === "use" /* Use */ && symbol.importSource) {
       const sourceModuleScope = this.config.services.scopeManager.findScopeByName(symbol.importSource, "Module" /* Module */);
       if (sourceModuleScope) {
         let sourceSymbol = sourceModuleScope.symbols.get(symbol.name);
@@ -4982,7 +4843,7 @@ var SymbolResolver = class extends PhaseBase {
       const currentScope = this.config.services.scopeManager.getCurrentScope();
       if (currentScope.kind === "Function" /* Function */) {
         const parentScope = this.config.services.scopeManager.getScopeParent(currentScope.id);
-        if (parentScope && parentScope.kind === "Type" /* Type */) {
+        if (parentScope && parentScope.kind === "type" /* Type */) {
           const fieldSymbol = parentScope.symbols.get(ident.name);
           if (fieldSymbol && fieldSymbol.kind === "StructField" /* StructField */) {
             fieldSymbol.used = true;
@@ -5132,20 +4993,20 @@ var SymbolResolver = class extends PhaseBase {
           }
         }
         if (!typeScope && struct.name && struct.name !== "Anonymous") {
-          typeScope = this.config.services.scopeManager.findChildScopeByName(struct.name, "Type" /* Type */);
+          typeScope = this.config.services.scopeManager.findChildScopeByName(struct.name, "type" /* Type */);
         }
         if (!typeScope) {
           typeScope = this.config.services.scopeManager.findChildScopeByNameFromId(
             symbol.name,
             symbol.scope,
-            "Type" /* Type */
+            "type" /* Type */
           );
         }
         if (!typeScope) {
           const parentScope = this.config.services.scopeManager.getScope(symbol.scope);
           for (const childId of parentScope.children) {
             const child = this.config.services.scopeManager.getScope(childId);
-            if (child.kind === "Type" /* Type */) {
+            if (child.kind === "type" /* Type */) {
               if (this.scopeMatchesStruct(child, struct)) {
                 typeScope = child;
                 break;
@@ -5194,7 +5055,7 @@ var SymbolResolver = class extends PhaseBase {
           }
         }
         if (!typeScope && symbol.name) {
-          typeScope = this.config.services.scopeManager.findChildScopeByName(symbol.name, "Type" /* Type */);
+          typeScope = this.config.services.scopeManager.findChildScopeByName(symbol.name, "type" /* Type */);
         }
         if (typeScope) {
           enumType.metadata = __spreadProps(__spreadValues({}, enumType.metadata), { scopeId: typeScope.id });
@@ -5224,7 +5085,7 @@ var SymbolResolver = class extends PhaseBase {
                       variantScope = this.config.services.scopeManager.findChildScopeByNameFromId(
                         variant.ident.name,
                         typeScope.id,
-                        "Type" /* Type */
+                        "type" /* Type */
                       );
                     }
                     if (variantScope) {
@@ -5534,7 +5395,7 @@ var SymbolResolver = class extends PhaseBase {
 };
 
 // lib/phases/TypeValidator/TypeValidator.ts
-var AST5 = __toESM(require("@je-es/ast"));
+var AST4 = __toESM(require("@je-es/ast"));
 
 // lib/phases/TypeValidator/ExpressionEvaluator.ts
 var ExpressionEvaluator = class {
@@ -5621,22 +5482,22 @@ var ExpressionEvaluator = class {
     };
     try {
       switch (expr.kind) {
-        case "Primary":
+        case "primary":
           return this.evaluatePrimary(expr.getPrimary(), context);
-        case "Binary":
+        case "binary":
           return this.evaluateBinary(expr.getBinary(), context);
-        case "Prefix":
+        case "prefix":
           return this.evaluatePrefix(expr.getPrefix(), context);
-        case "Postfix": {
+        case "postfix": {
           const postfix = expr.getPostfix();
-          if ((postfix == null ? void 0 : postfix.kind) === "Call") {
+          if ((postfix == null ? void 0 : postfix.kind) === "call") {
             return this.evaluateComptimeFunctionCall(postfix.getCall(), context);
           }
           return null;
         }
-        case "As":
+        case "as":
           return this.evaluateAs(expr.getAs(), context);
-        case "Sizeof":
+        case "sizeof":
           return this.evaluateSizeof(expr.getSizeof(), context);
         default:
           return null;
@@ -5654,11 +5515,11 @@ var ExpressionEvaluator = class {
   // ┌──────────────────────────────── PRIMARY ──────────────────────────────┐
   evaluatePrimary(primary, ctx) {
     switch (primary.kind) {
-      case "Literal":
+      case "literal":
         return this.evaluateLiteral(primary.getLiteral(), ctx);
-      case "Ident":
+      case "ident":
         return this.evaluateIdentifier(primary.getIdent(), ctx);
-      case "Paren": {
+      case "paren": {
         const paren = primary.getParen();
         return paren.source ? this.evaluateExpression(paren.source, ctx) : null;
       }
@@ -5768,23 +5629,23 @@ var ExpressionEvaluator = class {
       return null;
     }
     switch (binary.kind) {
-      case "Additive":
+      case "additive":
         return this.evaluateAdditive(left, right, binary.operator, binary.span);
-      case "Multiplicative":
+      case "multiplicative":
         return this.evaluateMultiplicative(left, right, binary.operator, binary.span);
-      case "Power":
+      case "power":
         return this.evaluatePower(left, right, binary.span);
-      case "Shift":
+      case "shift":
         return this.evaluateShift(left, right, binary.operator, binary.span);
-      case "BitwiseAnd":
-      case "BitwiseXor":
-      case "BitwiseOr":
+      case "bitwiseAnd":
+      case "bitwiseXor":
+      case "bitwiseOr":
         return this.evaluateBitwise(left, right, binary.kind, binary.span);
-      case "Relational":
-      case "Equality":
+      case "relational":
+      case "equality":
         return this.evaluateComparison(left, right, binary.operator, binary.span);
-      case "LogicalAnd":
-      case "LogicalOr":
+      case "logicalAnd":
+      case "logicalOr":
         return this.evaluateLogical(left, right, binary.kind, binary.span);
       default:
         return null;
@@ -6019,13 +5880,13 @@ var ExpressionEvaluator = class {
     const r = right.value;
     let result;
     switch (op) {
-      case "BitwiseAnd":
+      case "bitwiseAnd":
         result = l & r;
         break;
-      case "BitwiseXor":
+      case "bitwiseXor":
         result = l ^ r;
         break;
-      case "BitwiseOr":
+      case "bitwiseOr":
         result = l | r;
         break;
     }
@@ -6068,7 +5929,7 @@ var ExpressionEvaluator = class {
     }
     const l = left.value;
     const r = right.value;
-    const result = op === "LogicalAnd" ? l && r : l || r;
+    const result = op === "logicalAnd" ? l && r : l || r;
     return { value: result, type: "bool" };
   }
   // └──────────────────────────────────────────────────────────────────────┘
@@ -6077,7 +5938,7 @@ var ExpressionEvaluator = class {
     const value = this.evaluateExpression(prefix.expr, ctx);
     if (!value) return null;
     switch (prefix.kind) {
-      case "UnaryPlus":
+      case "unaryPlus":
         if (value.type !== "int" && value.type !== "float") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6087,7 +5948,7 @@ var ExpressionEvaluator = class {
           return null;
         }
         return value;
-      case "UnaryMinus":
+      case "unaryMinus":
         if (value.type !== "int" && value.type !== "float") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6112,7 +5973,7 @@ var ExpressionEvaluator = class {
           return { value: -value.value, type: "float" };
         }
         return null;
-      case "LogicalNot":
+      case "logicalNot":
         if (value.type !== "bool") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6122,7 +5983,7 @@ var ExpressionEvaluator = class {
           return null;
         }
         return { value: !value.value, type: "bool" };
-      case "BitwiseNot":
+      case "bitwiseNot":
         if (value.type !== "int") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6181,9 +6042,9 @@ var ExpressionEvaluator = class {
     if (functionSymbol.kind === "Variable" /* Variable */) {
       if ((_a = functionSymbol.metadata) == null ? void 0 : _a.initializer) {
         const initExpr = functionSymbol.metadata.initializer;
-        if (initExpr.is("Primary")) {
+        if (initExpr.is("primary")) {
           const primary = initExpr.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const targetIdent = primary.getIdent();
             const resolvedSymbol = this.config.services.scopeManager.lookupSymbol(targetIdent.name);
             if (resolvedSymbol) {
@@ -6352,7 +6213,7 @@ var ExpressionEvaluator = class {
       `[Comptime] localVariables has ${localVariables.size} entries: ${Array.from(localVariables.keys()).join(", ")}`
     );
     const processStatement = (stmt) => {
-      if (stmt.kind === "Let") {
+      if (stmt.kind === "let") {
         const letNode = stmt.getLet();
         if (letNode && letNode.field.initializer) {
           const value = this.evaluateWithLocals(
@@ -6371,18 +6232,18 @@ var ExpressionEvaluator = class {
           return null;
         }
       }
-      if (stmt.kind === "Return") {
-        const returnNode = stmt.getCtrlflow();
-        if (returnNode == null ? void 0 : returnNode.value) {
+      if (stmt.kind === "return") {
+        const returnNode = stmt.getReturn();
+        if (returnNode == null ? void 0 : returnNode.expr) {
           return this.evaluateWithLocals(
-            returnNode.value,
+            returnNode.expr,
             ctx,
             functionScope,
             localVariables
           );
         }
       }
-      if (stmt.kind === "Expression") {
+      if (stmt.kind === "expression") {
         const expr = stmt.getExpr();
         if (expr) {
           return this.evaluateWithLocals(
@@ -6395,7 +6256,7 @@ var ExpressionEvaluator = class {
       }
       return null;
     };
-    if (body.kind === "Block") {
+    if (body.kind === "block") {
       const blockNode = body.getBlock();
       if (!blockNode || blockNode.stmts.length === 0) {
         return null;
@@ -6421,22 +6282,22 @@ var ExpressionEvaluator = class {
   evaluateWithLocals(expr, ctx, scope, locals) {
     try {
       switch (expr.kind) {
-        case "Primary":
+        case "primary":
           return this.evaluatePrimaryWithLocals(expr.getPrimary(), ctx, scope, locals);
-        case "Binary":
+        case "binary":
           return this.evaluateBinaryWithLocals(expr.getBinary(), ctx, scope, locals);
-        case "Prefix":
+        case "prefix":
           return this.evaluatePrefixWithLocals(expr.getPrefix(), ctx, scope, locals);
-        case "Postfix": {
+        case "postfix": {
           const postfix = expr.getPostfix();
-          if ((postfix == null ? void 0 : postfix.kind) === "Call") {
+          if ((postfix == null ? void 0 : postfix.kind) === "call") {
             return this.evaluateComptimeFunctionCall(postfix.getCall(), ctx);
           }
           return null;
         }
-        case "As":
+        case "as":
           return this.evaluateAsWithLocals(expr.getAs(), ctx, scope, locals);
-        case "Sizeof":
+        case "sizeof":
           return this.evaluateSizeof(expr.getSizeof(), ctx);
         default:
           return null;
@@ -6452,11 +6313,11 @@ var ExpressionEvaluator = class {
   }
   evaluatePrimaryWithLocals(primary, ctx, scope, locals) {
     switch (primary.kind) {
-      case "Literal":
+      case "literal":
         return this.evaluateLiteral(primary.getLiteral(), ctx);
-      case "Ident":
+      case "ident":
         return this.evaluateIdentifierWithLocals(primary.getIdent(), ctx, scope, locals);
-      case "Paren": {
+      case "paren": {
         const paren = primary.getParen();
         return paren.source ? this.evaluateWithLocals(paren.source, ctx, scope, locals) : null;
       }
@@ -6501,23 +6362,23 @@ var ExpressionEvaluator = class {
       return null;
     }
     switch (binary.kind) {
-      case "Additive":
+      case "additive":
         return this.evaluateAdditive(left, right, binary.operator, binary.span);
-      case "Multiplicative":
+      case "multiplicative":
         return this.evaluateMultiplicative(left, right, binary.operator, binary.span);
-      case "Power":
+      case "power":
         return this.evaluatePower(left, right, binary.span);
-      case "Shift":
+      case "shift":
         return this.evaluateShift(left, right, binary.operator, binary.span);
-      case "BitwiseAnd":
-      case "BitwiseXor":
-      case "BitwiseOr":
+      case "bitwiseAnd":
+      case "bitwiseXor":
+      case "bitwiseOr":
         return this.evaluateBitwise(left, right, binary.kind, binary.span);
-      case "Relational":
-      case "Equality":
+      case "relational":
+      case "equality":
         return this.evaluateComparison(left, right, binary.operator, binary.span);
-      case "LogicalAnd":
-      case "LogicalOr":
+      case "logicalAnd":
+      case "logicalOr":
         return this.evaluateLogical(left, right, binary.kind, binary.span);
       default:
         return null;
@@ -6527,7 +6388,7 @@ var ExpressionEvaluator = class {
     const value = this.evaluateWithLocals(prefix.expr, ctx, scope, locals);
     if (!value) return null;
     switch (prefix.kind) {
-      case "UnaryPlus":
+      case "unaryPlus":
         if (value.type !== "int" && value.type !== "float") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6537,7 +6398,7 @@ var ExpressionEvaluator = class {
           return null;
         }
         return value;
-      case "UnaryMinus":
+      case "unaryMinus":
         if (value.type !== "int" && value.type !== "float") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6562,7 +6423,7 @@ var ExpressionEvaluator = class {
           return { value: -value.value, type: "float" };
         }
         return null;
-      case "LogicalNot":
+      case "logicalNot":
         if (value.type !== "bool") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6572,7 +6433,7 @@ var ExpressionEvaluator = class {
           return null;
         }
         return { value: !value.value, type: "bool" };
-      case "BitwiseNot":
+      case "bitwiseNot":
         if (value.type !== "int") {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -6622,9 +6483,9 @@ var ExpressionEvaluator = class {
     return key;
   }
   findCallTargetSymbol(baseExpr) {
-    if (baseExpr.is("Primary")) {
+    if (baseExpr.is("primary")) {
       const primary = baseExpr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if (ident && !ident.builtin) {
           return this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -6839,7 +6700,7 @@ var ExpressionEvaluator = class {
 };
 
 // lib/phases/TypeValidator/TypeInference.ts
-var AST4 = __toESM(require("@je-es/ast"));
+var AST3 = __toESM(require("@je-es/ast"));
 var TypeInference = class {
   constructor(config, typeValidator) {
     this.config = config;
@@ -6870,9 +6731,9 @@ var TypeInference = class {
     }
   }
   inferExpressionTypeWithContext(expr, expectedType) {
-    if (expectedType && expr.is("Primary")) {
+    if (expectedType && expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary && primary.is("Object")) {
+      if (primary && primary.is("object")) {
         const obj = primary.getObject();
         if (!obj.ident) {
           const resolvedExpected = this.resolveIdentifierType(expectedType);
@@ -6889,17 +6750,17 @@ var TypeInference = class {
     this.config.services.contextTracker.pushContextSpan(expr.span);
     try {
       switch (expr.kind) {
-        case "Primary":
+        case "primary":
           return this.inferPrimaryType(expr.getPrimary());
-        case "Binary":
+        case "binary":
           return this.inferBinaryType(expr.getBinary());
-        case "Prefix":
+        case "prefix":
           return this.inferPrefixType(expr.getPrefix());
-        case "Postfix":
+        case "postfix":
           return this.inferPostfixType(expr.getPostfix());
-        case "As":
+        case "as":
           return this.inferAsType(expr.getAs());
-        case "Typeof": {
+        case "typeof": {
           const typeofNode = expr.getTypeof();
           const innerType = this.inferExpressionType(typeofNode.expr);
           if (!innerType) {
@@ -6910,9 +6771,9 @@ var TypeInference = class {
             );
             return null;
           }
-          return AST4.TypeNode.asPrimitive(expr.span, "type");
+          return AST3.TypeNode.asPrimitive(expr.span, "type");
         }
-        case "Sizeof": {
+        case "sizeof": {
           const sizeofNode = expr.getSizeof();
           const targetType = this.inferExpressionType(sizeofNode.expr);
           if (!targetType) {
@@ -6930,21 +6791,21 @@ var TypeInference = class {
               `Cannot compute size of type '${this.getTypeDisplayName(targetType)}'`,
               sizeofNode.expr.span
             );
-            return AST4.TypeNode.asComptimeInt(expr.span, "0");
+            return AST3.TypeNode.asComptimeInt(expr.span, "0");
           }
-          return AST4.TypeNode.asComptimeInt(expr.span, size.toString());
+          return AST3.TypeNode.asComptimeInt(expr.span, size.toString());
         }
-        case "Orelse":
+        case "orelse":
           return this.inferOrelseType(expr.getOrelse());
-        case "Range":
+        case "range":
           return this.inferRangeType(expr.getRange());
-        case "Try":
+        case "try":
           return this.inferTryType(expr.getTry());
-        case "Catch":
+        case "catch":
           return this.inferCatchType(expr.getCatch());
-        case "If":
+        case "if":
           return this.inferIfType(expr.getIf());
-        case "Match":
+        case "match":
           return this.inferSwitchType(expr.getMatch());
         default:
           return null;
@@ -6957,21 +6818,21 @@ var TypeInference = class {
   // ┌──────────────────────────────── PRIMARY ─────────────────────────────┐
   inferPrimaryType(primary) {
     switch (primary.kind) {
-      case "Literal":
+      case "literal":
         return this.inferLiteralType(primary.getLiteral());
-      case "Ident":
+      case "ident":
         return this.inferIdentifierType(primary.getIdent());
-      case "Paren":
+      case "paren":
         const paren = primary.getParen();
         return paren.source ? this.inferExpressionType(paren.source) : null;
-      case "Tuple":
+      case "tuple":
         return this.inferTupleType(primary.getTuple());
-      case "Object":
+      case "object":
         return this.inferObjectType(primary.getObject());
-      case "Type":
+      case "type":
         return primary.getType();
-      case "Unreachable":
-        return AST4.TypeNode.asNoreturn(primary.span);
+      case "unreachable":
+        return AST3.TypeNode.asNoreturn(primary.span);
       default:
         return null;
     }
@@ -6980,12 +6841,12 @@ var TypeInference = class {
     switch (literal.kind) {
       case "String":
         const str = literal.value;
-        const sizeExpr = AST4.ExprNode.asInteger(literal.span, str.length);
-        return AST4.TypeNode.asArray(literal.span, AST4.TypeNode.asUnsigned(literal.span, "u8", 8), sizeExpr);
+        const sizeExpr = AST3.ExprNode.asInteger(literal.span, str.length);
+        return AST3.TypeNode.asArray(literal.span, AST3.TypeNode.asUnsigned(literal.span, "u8", 8), sizeExpr);
       case "Integer":
-        return AST4.TypeNode.asComptimeInt(literal.span, literal.value);
+        return AST3.TypeNode.asComptimeInt(literal.span, literal.value);
       case "Float":
-        return AST4.TypeNode.asComptimeFloat(literal.span, literal.value);
+        return AST3.TypeNode.asComptimeFloat(literal.span, literal.value);
       case "Character": {
         const charValue = literal.value;
         if (charValue.length === 0) {
@@ -6993,30 +6854,30 @@ var TypeInference = class {
           if (expectedType) {
             const resolvedType = this.resolveIdentifierType(expectedType);
             if (resolvedType.isUnsigned() && resolvedType.getWidth() === 21) {
-              return AST4.TypeNode.asUnsigned(literal.span, "u21", 21);
+              return AST3.TypeNode.asUnsigned(literal.span, "u21", 21);
             }
             if (resolvedType.isUnsigned() && resolvedType.getWidth() === 8) {
-              return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+              return AST3.TypeNode.asUnsigned(literal.span, "u8", 8);
             }
           }
-          return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+          return AST3.TypeNode.asUnsigned(literal.span, "u8", 8);
         }
         const codePoint = charValue.codePointAt(0) || 0;
         if (codePoint > 127) {
-          return AST4.TypeNode.asUnsigned(literal.span, "u21", 21);
+          return AST3.TypeNode.asUnsigned(literal.span, "u21", 21);
         }
-        return AST4.TypeNode.asUnsigned(literal.span, "u8", 8);
+        return AST3.TypeNode.asUnsigned(literal.span, "u8", 8);
       }
       case "Bool":
-        return AST4.TypeNode.asBool(literal.span);
+        return AST3.TypeNode.asBool(literal.span);
       case "Null":
-        return AST4.TypeNode.asNull(literal.span);
+        return AST3.TypeNode.asNull(literal.span);
       case "Undefined":
-        return AST4.TypeNode.asUndefined(literal.span);
+        return AST3.TypeNode.asUndefined(literal.span);
       case "Array":
         return this.inferArrayLiteralType(literal);
       default:
-        return AST4.TypeNode.asUndefined(literal.span);
+        return AST3.TypeNode.asUndefined(literal.span);
     }
   }
   inferIdentifierType(ident) {
@@ -7053,7 +6914,7 @@ var TypeInference = class {
       return symbol.type;
     }
     if (symbol.kind === "Definition" /* Definition */ && ((_c = symbol.type) == null ? void 0 : _c.isType())) {
-      return AST4.TypeNode.asPrimitive(ident.span, "type");
+      return AST3.TypeNode.asPrimitive(ident.span, "type");
     }
     if (symbol.type) return symbol.type;
     if (symbol.kind === "Function" /* Function */ && symbol.metadata) {
@@ -7067,7 +6928,7 @@ var TypeInference = class {
         }
       }
       const returnType = metadata.returnType || null;
-      const funcType = AST4.TypeNode.asFunction(
+      const funcType = AST3.TypeNode.asFunction(
         symbol.contextSpan || ident.span,
         paramTypes,
         returnType
@@ -7080,13 +6941,13 @@ var TypeInference = class {
   inferArrayLiteralType(literal) {
     const elements = literal.value;
     if (elements.length === 0) {
-      const sizeExpr2 = AST4.ExprNode.asInteger(literal.span, 0);
-      return AST4.TypeNode.asArray(literal.span, AST4.TypeNode.asUndefined(literal.span), sizeExpr2);
+      const sizeExpr2 = AST3.ExprNode.asInteger(literal.span, 0);
+      return AST3.TypeNode.asArray(literal.span, AST3.TypeNode.asUndefined(literal.span), sizeExpr2);
     }
     const firstType = this.inferExpressionType(elements[0]);
     if (!firstType) {
-      const sizeExpr2 = AST4.ExprNode.asInteger(literal.span, elements.length);
-      return AST4.TypeNode.asArray(literal.span, AST4.TypeNode.asUndefined(literal.span), sizeExpr2);
+      const sizeExpr2 = AST3.ExprNode.asInteger(literal.span, elements.length);
+      return AST3.TypeNode.asArray(literal.span, AST3.TypeNode.asUndefined(literal.span), sizeExpr2);
     }
     for (let i = 1; i < elements.length; i++) {
       if (!this.typeValidator.validateTypeAssignment(elements[i], firstType, `Array element ${i}`)) {
@@ -7100,8 +6961,8 @@ var TypeInference = class {
         );
       }
     }
-    const sizeExpr = AST4.ExprNode.asInteger(literal.span, elements.length);
-    return AST4.TypeNode.asArray(literal.span, firstType, sizeExpr);
+    const sizeExpr = AST3.ExprNode.asInteger(literal.span, elements.length);
+    return AST3.TypeNode.asArray(literal.span, firstType, sizeExpr);
   }
   inferObjectType(obj) {
     if (obj.ident) {
@@ -7167,7 +7028,7 @@ var TypeInference = class {
     const fields = [];
     const fieldNodes = [];
     for (const prop of obj.props) {
-      const fieldType = prop.val ? this.inferExpressionType(prop.val) : AST4.TypeNode.asUndefined(prop.key.span);
+      const fieldType = prop.val ? this.inferExpressionType(prop.val) : AST3.TypeNode.asUndefined(prop.key.span);
       if (!fieldType) {
         this.reportError(
           "CANNOT_INFER_TYPE" /* CANNOT_INFER_TYPE */,
@@ -7177,7 +7038,7 @@ var TypeInference = class {
         return null;
       }
       fields.push(fieldType);
-      const fieldNode = AST4.FieldNode.create(
+      const fieldNode = AST3.FieldNode.create(
         prop.key.span,
         { kind: "Private" },
         { kind: "Runtime" },
@@ -7188,8 +7049,8 @@ var TypeInference = class {
       );
       fieldNodes.push(fieldNode);
     }
-    const members = fieldNodes.map((f) => AST4.StructMemberNode.createField(f.span, f));
-    return AST4.TypeNode.asStruct(obj.span, members, "Anonymous");
+    const members = fieldNodes.map((f) => AST3.StructMemberNode.createField(f.span, f));
+    return AST3.TypeNode.asStruct(obj.span, members, "Anonymous");
   }
   inferTupleType(tuple) {
     const fieldTypes = [];
@@ -7198,13 +7059,13 @@ var TypeInference = class {
       if (!fieldType) return null;
       fieldTypes.push(fieldType);
     }
-    return AST4.TypeNode.asTuple(tuple.span, fieldTypes);
+    return AST3.TypeNode.asTuple(tuple.span, fieldTypes);
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── BINARY ──────────────────────────────┐
   inferBinaryType(binary) {
     if (!binary.left || !binary.right) return null;
-    if (binary.kind === "Assignment") {
+    if (binary.kind === "assignment") {
       this.typeValidator.validateAssignment(binary);
       return this.inferExpressionType(binary.right);
     }
@@ -7219,7 +7080,7 @@ var TypeInference = class {
       );
       return null;
     }
-    if (binary.kind === "Additive" && binary.operator === "+") {
+    if (binary.kind === "additive" && binary.operator === "+") {
       const resolvedLeft = this.resolveIdentifierType(leftType);
       const resolvedRight = this.resolveIdentifierType(rightType);
       const leftIsString = this.isStringType(resolvedLeft);
@@ -7227,8 +7088,8 @@ var TypeInference = class {
       if (leftIsString && rightIsString) {
         const leftMutability = this.getExpressionMutability(binary.left);
         const rightMutability = this.getExpressionMutability(binary.right);
-        const leftEffective = leftMutability === "Literal" ? null : leftMutability;
-        const rightEffective = rightMutability === "Literal" ? null : rightMutability;
+        const leftEffective = leftMutability === "literal" ? null : leftMutability;
+        const rightEffective = rightMutability === "literal" ? null : rightMutability;
         if (leftEffective !== null && rightEffective !== null) {
           if (leftEffective !== rightEffective) {
             this.reportError(
@@ -7251,9 +7112,9 @@ var TypeInference = class {
       }
     }
     switch (binary.kind) {
-      case "Additive":
-      case "Multiplicative":
-      case "Power":
+      case "additive":
+      case "multiplicative":
+      case "power":
         if (!this.isNumericType(leftType) || !this.isNumericType(rightType)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7263,10 +7124,10 @@ var TypeInference = class {
           return null;
         }
         return this.promoteNumericTypes(leftType, rightType, binary.span);
-      case "Shift":
-      case "BitwiseAnd":
-      case "BitwiseXor":
-      case "BitwiseOr":
+      case "shift":
+      case "bitwiseAnd":
+      case "bitwiseXor":
+      case "bitwiseOr":
         if (!this.isIntegerType(leftType) || !this.isIntegerType(rightType)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7276,8 +7137,8 @@ var TypeInference = class {
           return null;
         }
         return this.promoteNumericTypes(leftType, rightType, binary.span);
-      case "Equality":
-      case "Relational":
+      case "equality":
+      case "relational":
         if (leftType.isNull() && !rightType.isOptional() && !rightType.isNull() && !rightType.isPointer()) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7291,10 +7152,10 @@ var TypeInference = class {
             binary.left.span
           );
         }
-        return AST4.TypeNode.asBool(binary.span);
-      case "LogicalAnd":
-      case "LogicalOr":
-        return AST4.TypeNode.asBool(binary.span);
+        return AST3.TypeNode.asBool(binary.span);
+      case "logicalAnd":
+      case "logicalOr":
+        return AST3.TypeNode.asBool(binary.span);
       default:
         return null;
     }
@@ -7305,19 +7166,19 @@ var TypeInference = class {
     const exprType = this.inferExpressionType(prefix.expr);
     if (!exprType) return null;
     switch (prefix.kind) {
-      case "UnaryPlus":
-      case "UnaryMinus":
+      case "unaryPlus":
+      case "unaryMinus":
         if (!this.isNumericType(exprType)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
-            `Unary '${prefix.kind === "UnaryMinus" ? "-" : "+"}' requires a numeric operand, got '${this.getTypeDisplayName(exprType)}'`,
+            `Unary '${prefix.kind === "unaryMinus" ? "-" : "+"}' requires a numeric operand, got '${this.getTypeDisplayName(exprType)}'`,
             prefix.expr.span
           );
           return null;
         }
-        return this.computeUnaryResultType(exprType, prefix.kind === "UnaryMinus", prefix.span);
-      case "Increment":
-      case "Decrement":
+        return this.computeUnaryResultType(exprType, prefix.kind === "unaryMinus", prefix.span);
+      case "increment":
+      case "decrement":
         if (!this.isNumericType(exprType)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7327,9 +7188,9 @@ var TypeInference = class {
           return null;
         }
         return exprType;
-      case "LogicalNot":
-        return AST4.TypeNode.asBool(prefix.span);
-      case "BitwiseNot":
+      case "logicalNot":
+        return AST3.TypeNode.asBool(prefix.span);
+      case "bitwiseNot":
         if (!this.isIntegerType(exprType)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7339,7 +7200,7 @@ var TypeInference = class {
           return null;
         }
         return exprType;
-      case "Reference":
+      case "reference":
         if (!this.isLValueExpression(prefix.expr)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
@@ -7350,9 +7211,9 @@ var TypeInference = class {
         }
         let isMutablePointer = false;
         let resolvedType = exprType;
-        if (prefix.expr.is("Primary")) {
+        if (prefix.expr.is("primary")) {
           const primary = prefix.expr.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const ident = primary.getIdent();
             if (ident) {
               const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -7366,7 +7227,7 @@ var TypeInference = class {
           }
         }
         const normalizedType = this.normalizeType(resolvedType);
-        return AST4.TypeNode.asPointer(prefix.span, normalizedType, isMutablePointer);
+        return AST3.TypeNode.asPointer(prefix.span, normalizedType, isMutablePointer);
       default:
         return null;
     }
@@ -7375,14 +7236,14 @@ var TypeInference = class {
   // ┌──────────────────────────────── POSTFIX ─────────────────────────────┐
   inferPostfixType(postfix) {
     switch (postfix.kind) {
-      case "Call":
+      case "call":
         return this.inferCallType(postfix.getCall());
-      case "ArrayAccess":
+      case "arrayAccess":
         return this.inferArrayAccessType(postfix.getArrayAccess());
-      case "MemberAccess":
+      case "memberAccess":
         return this.inferMemberAccessType(postfix.getMemberAccess());
-      case "Increment":
-      case "Decrement":
+      case "increment":
+      case "decrement":
         const exprType = this.inferExpressionType(postfix.getAsExprNode());
         if (exprType && !this.isNumericType(exprType)) {
           this.reportError(
@@ -7393,7 +7254,7 @@ var TypeInference = class {
           return null;
         }
         return exprType;
-      case "Dereference":
+      case "dereference":
         const ptrType = this.inferExpressionType(postfix.getAsExprNode());
         if (!ptrType) {
           this.reportError(
@@ -7423,9 +7284,9 @@ var TypeInference = class {
     if (this.typeValidator.isBuiltinFunction(call.base)) {
       return this.typeValidator.validateBuiltinCall(call);
     }
-    if (call.base.is("Postfix")) {
+    if (call.base.is("postfix")) {
       const postfix = call.base.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const access = postfix.getMemberAccess();
         const baseType = this.inferExpressionType(access.base);
         if (baseType) {
@@ -7474,7 +7335,7 @@ var TypeInference = class {
     const indexType = this.inferExpressionType(access.index);
     if (!baseType) return null;
     const resolvedType = this.resolveIdentifierType(baseType);
-    if (access.index.kind === "Range") {
+    if (access.index.kind === "range") {
       return resolvedType;
     }
     if (indexType && !this.isIntegerType(indexType)) {
@@ -7522,9 +7383,9 @@ var TypeInference = class {
   inferMemberAccessType(access) {
     var _a, _b, _c;
     this.log("verbose", `inferMemberAccessType: currentIsStaticMethod=${this.typeValidator.currentIsStaticMethod}, currentStructScope=${((_a = this.typeValidator.currentStructScope) == null ? void 0 : _a.name) || "null"}`);
-    if (access.base.is("Primary")) {
+    if (access.base.is("primary")) {
       const primary = access.base.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if ((ident == null ? void 0 : ident.name) === "self") {
           if (this.typeValidator.currentIsStaticMethod && this.typeValidator.currentStructScope) {
@@ -7562,7 +7423,7 @@ var TypeInference = class {
           return null;
         }
         const baseSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
-        if (baseSymbol && baseSymbol.kind === "Use" /* Use */ && ((_c = baseSymbol.metadata) == null ? void 0 : _c.isWildcardImport)) {
+        if (baseSymbol && baseSymbol.kind === "use" /* Use */ && ((_c = baseSymbol.metadata) == null ? void 0 : _c.isWildcardImport)) {
           return this.resolveWildcardMemberAccess(access, baseSymbol);
         }
       }
@@ -7575,7 +7436,7 @@ var TypeInference = class {
     if (baseType.isArray() || this.isStringType(baseType)) {
       const memberName = this.extractMemberName(access.target);
       if (memberName === "len") {
-        return AST4.TypeNode.asUnsigned(access.span, "usize", 64);
+        return AST3.TypeNode.asUnsigned(access.span, "usize", 64);
       }
       this.reportError(
         "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
@@ -7587,7 +7448,7 @@ var TypeInference = class {
     if (baseType.isTuple()) {
       const memberName = this.extractMemberName(access.target);
       if (memberName === "len") {
-        return AST4.TypeNode.asUnsigned(access.span, "usize", 64);
+        return AST3.TypeNode.asUnsigned(access.span, "usize", 64);
       }
       this.reportError(
         "SYMBOL_NOT_FOUND" /* SYMBOL_NOT_FOUND */,
@@ -7604,9 +7465,9 @@ var TypeInference = class {
       );
       return null;
     }
-    if (access.base.is("Postfix")) {
+    if (access.base.is("postfix")) {
       const postfix = access.base.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "Dereference") {
+      if ((postfix == null ? void 0 : postfix.kind) === "dereference") {
         if (baseType.isIdent()) {
           const ident = baseType.getIdent();
           const typeSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -7649,7 +7510,7 @@ var TypeInference = class {
       isStaticAccess
     );
     if (optionalDepth > 0 && memberType) {
-      return AST4.TypeNode.asOptional(access.span, memberType);
+      return AST3.TypeNode.asOptional(access.span, memberType);
     }
     return memberType;
   }
@@ -7663,7 +7524,7 @@ var TypeInference = class {
     if (leftType.isOptional()) {
       const unwrapped = leftType.getOptional().target;
       if (rightType.isNull()) {
-        return AST4.TypeNode.asUnion(orelse.span, [unwrapped, rightType]);
+        return AST3.TypeNode.asUnion(orelse.span, [unwrapped, rightType]);
       }
       if (rightType.isOptional()) {
         const rightUnwrapped = rightType.getOptional().target;
@@ -7694,7 +7555,7 @@ var TypeInference = class {
     if (range.rightExpr) {
       this.typeValidator.validateIntegerRangeExpr(range.rightExpr, "end", range.rightExpr.span);
     }
-    return AST4.TypeNode.asPrimitive(range.span, "type");
+    return AST3.TypeNode.asPrimitive(range.span, "type");
   }
   inferTryType(tryNode) {
     const exprType = this.inferExpressionType(tryNode.expr);
@@ -7703,7 +7564,7 @@ var TypeInference = class {
   }
   inferCatchType(catchNode) {
     const leftType = this.inferExpressionType(catchNode.leftExpr);
-    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "Expression" /* Expression */);
+    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "expression" /* Expression */);
     if (exprScope) {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(exprScope.id, () => {
@@ -7718,7 +7579,7 @@ var TypeInference = class {
     if (condType && !condType.isBool()) {
       this.log("verbose", `If condition has type ${this.getTypeDisplayName(condType)}, expected bool`);
     }
-    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "Expression" /* Expression */);
+    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "expression" /* Expression */);
     if (exprScope) {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(exprScope.id, () => {
@@ -7739,7 +7600,7 @@ var TypeInference = class {
   inferSwitchType(MatchNode) {
     this.inferExpressionType(MatchNode.condExpr);
     this.typeValidator.validateSwitchExhaustiveness(MatchNode);
-    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "Expression" /* Expression */);
+    const exprScope = this.config.services.scopeManager.findChildScopeByName("expr", "expression" /* Expression */);
     for (const switchCase of MatchNode.cases) {
       if (switchCase.expr) {
         this.inferExpressionType(switchCase.expr);
@@ -7953,20 +7814,20 @@ var TypeInference = class {
     return false;
   }
   isTypeExpression(expr) {
-    if (expr.kind === "Primary") {
+    if (expr.kind === "primary") {
       const primary = expr.getPrimary();
       if (!primary) return false;
-      if (primary.kind === "Object") {
+      if (primary.kind === "object") {
         const obj = primary.getObject();
         if (obj && obj.ident) {
           return false;
         }
         return false;
       }
-      if (primary.kind === "Type") {
+      if (primary.kind === "type") {
         return true;
       }
-      if (primary.kind === "Ident") {
+      if (primary.kind === "ident") {
         const ident = primary.getIdent();
         if (!ident) return false;
         const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -7983,9 +7844,9 @@ var TypeInference = class {
     return (prim == null ? void 0 : prim.kind) === "type";
   }
   isPointerDereference(expr) {
-    if (!expr.is("Postfix")) return false;
+    if (!expr.is("postfix")) return false;
     const postfix = expr.getPostfix();
-    return (postfix == null ? void 0 : postfix.kind) === "Dereference";
+    return (postfix == null ? void 0 : postfix.kind) === "dereference";
   }
   isSameType(type1, type2) {
     if (type1 === type2) return true;
@@ -8056,22 +7917,22 @@ var TypeInference = class {
     return this.isSameType(resolved1, resolved2);
   }
   isConstructorExpression(expr) {
-    if (!expr.is("Primary")) return false;
+    if (!expr.is("primary")) return false;
     const primary = expr.getPrimary();
-    if (!(primary == null ? void 0 : primary.is("Object"))) return false;
+    if (!(primary == null ? void 0 : primary.is("object"))) return false;
     const obj = primary.getObject();
     return (obj == null ? void 0 : obj.ident) !== null && (obj == null ? void 0 : obj.ident) !== void 0;
   }
   isLValueExpression(expr) {
     switch (expr.kind) {
-      case "Primary": {
+      case "primary": {
         const primary = expr.getPrimary();
         switch (primary.kind) {
-          case "Ident":
+          case "ident":
             return true;
-          case "Literal":
+          case "literal":
             return false;
-          case "Paren": {
+          case "paren": {
             const paren = primary.getParen();
             return paren.source ? this.isLValueExpression(paren.source) : false;
           }
@@ -8079,74 +7940,74 @@ var TypeInference = class {
             return false;
         }
       }
-      case "Postfix": {
+      case "postfix": {
         const postfix = expr.getPostfix();
         switch (postfix.kind) {
-          case "Dereference":
+          case "dereference":
             return true;
-          case "ArrayAccess":
+          case "arrayAccess":
             return true;
-          case "MemberAccess":
+          case "memberAccess":
             return true;
-          case "Call":
+          case "call":
             return false;
-          case "Increment":
-          case "Decrement":
+          case "increment":
+          case "decrement":
             return false;
           default:
             return false;
         }
       }
-      case "Prefix": {
+      case "prefix": {
         const prefix = expr.getPrefix();
         switch (prefix.kind) {
-          case "Reference":
+          case "reference":
             return true;
-          case "Increment":
-          case "Decrement":
+          case "increment":
+          case "decrement":
             return this.isLValueExpression(prefix.expr);
           default:
             return false;
         }
       }
-      case "Binary":
-      case "As":
-      case "Orelse":
-      case "Range":
-      case "Try":
-      case "Catch":
-      case "If":
-      case "Match":
-      case "Typeof":
-      case "Sizeof":
+      case "binary":
+      case "as":
+      case "orelse":
+      case "range":
+      case "try":
+      case "catch":
+      case "if":
+      case "match":
+      case "typeof":
+      case "sizeof":
         return false;
       default:
         return false;
     }
   }
   isCharacterLiteral(expr) {
-    if (!expr.is("Primary")) return false;
+    if (!expr.is("primary")) return false;
     const primary = expr.getPrimary();
-    if (!(primary == null ? void 0 : primary.is("Literal"))) return false;
+    if (!(primary == null ? void 0 : primary.is("literal"))) return false;
     const literal = primary.getLiteral();
     return (literal == null ? void 0 : literal.kind) === "Character";
   }
   isBoolLiteral(expr, value) {
-    if (!expr || !expr.is("Primary")) return false;
+    if (!expr || !expr.is("primary")) return false;
     const primary = expr.getPrimary();
-    if (!(primary == null ? void 0 : primary.is("Literal"))) return false;
+    if (!(primary == null ? void 0 : primary.is("literal"))) return false;
     const literal = primary.getLiteral();
     return (literal == null ? void 0 : literal.kind) === "Bool" && literal.value === value;
   }
   isErrorExpression(expr) {
     var _a, _b, _c, _d;
-    if (expr.is("Postfix")) {
+    if (expr.is("postfix")) {
       const postfix = expr.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const memberAccess = postfix.getMemberAccess();
-        if (memberAccess.base.is("Primary")) {
+        if (memberAccess.base.is("primary")) {
           const primary = memberAccess.base.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const ident = primary.getIdent();
             const baseSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
             if (ident.name === "selferr") return true;
@@ -8157,9 +8018,9 @@ var TypeInference = class {
         return true;
       }
     }
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
         if ((symbol == null ? void 0 : symbol.kind) === "Variable" /* Variable */ && ((_c = symbol.type) == null ? void 0 : _c.isErr())) return true;
@@ -8179,15 +8040,15 @@ var TypeInference = class {
       const width12 = (_a = type1.getWidth()) != null ? _a : 32;
       const width22 = (_b = type2.getWidth()) != null ? _b : 32;
       const maxWidth2 = Math.max(width12, width22);
-      return AST4.TypeNode.asFloat(span, `f${maxWidth2}`, maxWidth2);
+      return AST3.TypeNode.asFloat(span, `f${maxWidth2}`, maxWidth2);
     }
     const width1 = (_c = type1.getWidth()) != null ? _c : 32;
     const width2 = (_d = type2.getWidth()) != null ? _d : 32;
     const maxWidth = Math.max(width1, width2);
     if (type1.isSigned() || type2.isSigned()) {
-      return AST4.TypeNode.asSigned(span, `i${maxWidth}`, maxWidth);
+      return AST3.TypeNode.asSigned(span, `i${maxWidth}`, maxWidth);
     }
-    return AST4.TypeNode.asUnsigned(span, `u${maxWidth}`, maxWidth);
+    return AST3.TypeNode.asUnsigned(span, `u${maxWidth}`, maxWidth);
   }
   computeUnaryResultType(operandType, isNegation, span) {
     var _a;
@@ -8195,11 +8056,11 @@ var TypeInference = class {
       const prim = operandType.getPrimitive();
       const txtStr = (prim == null ? void 0 : prim.text) !== void 0 ? String(prim.text) : "cint";
       const resultText = isNegation ? txtStr.startsWith("-") ? txtStr.slice(1) : `-${txtStr}` : txtStr;
-      return AST4.TypeNode.asComptimeInt(span, resultText);
+      return AST3.TypeNode.asComptimeInt(span, resultText);
     }
     if (operandType.isUnsigned() && isNegation) {
       const width = (_a = operandType.getWidth()) != null ? _a : 32;
-      return AST4.TypeNode.asSigned(span, `i${width}`, width);
+      return AST3.TypeNode.asSigned(span, `i${width}`, width);
     }
     return operandType;
   }
@@ -8234,7 +8095,7 @@ var TypeInference = class {
     if (type.isOptional()) {
       const inner = type.getOptional().target;
       const result = this.resolveMemberOnUnwrappedType(inner, access, symbol, isStaticAccess);
-      return result ? AST4.TypeNode.asOptional(access.span, result) : null;
+      return result ? AST3.TypeNode.asOptional(access.span, result) : null;
     }
     return null;
   }
@@ -8256,10 +8117,10 @@ var TypeInference = class {
       structScope = this.config.services.scopeManager.findChildScopeByNameFromId(
         struct.name,
         currentScope.id,
-        "Type" /* Type */
+        "type" /* Type */
       );
       if (!structScope) {
-        structScope = this.config.services.scopeManager.findScopeByName(struct.name, "Type" /* Type */);
+        structScope = this.config.services.scopeManager.findScopeByName(struct.name, "type" /* Type */);
       }
     }
     if (!structScope) {
@@ -8327,7 +8188,7 @@ var TypeInference = class {
       const errorType = enumType.getErrset();
       for (const member of errorType.members) {
         if (member.name === memberName) {
-          return AST4.TypeNode.asIdentifier(member.span, member.name);
+          return AST3.TypeNode.asIdentifier(member.span, member.name);
         }
       }
       this.reportError(
@@ -8664,9 +8525,9 @@ var TypeInference = class {
   }
   getExpressionMutability(expr) {
     var _a, _b, _c, _d;
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if (ident) {
           const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -8677,29 +8538,29 @@ var TypeInference = class {
           }
         }
       }
-      if (primary == null ? void 0 : primary.is("Literal")) {
+      if (primary == null ? void 0 : primary.is("literal")) {
         const literal = primary.getLiteral();
         if ((literal == null ? void 0 : literal.kind) === "String") {
-          return "Literal";
+          return "literal";
         }
       }
     }
-    if (expr.is("Binary")) {
+    if (expr.is("binary")) {
       const binary = expr.getBinary();
-      if (binary.kind === "Additive" && binary.operator === "+") {
+      if (binary.kind === "additive" && binary.operator === "+") {
         const leftMut = this.getExpressionMutability(binary.left);
         const rightMut = this.getExpressionMutability(binary.right);
-        if (leftMut === "Literal") return rightMut;
-        if (rightMut === "Literal") return leftMut;
+        if (leftMut === "literal") return rightMut;
+        if (rightMut === "literal") return leftMut;
         if (leftMut === "Mutable" !== (rightMut === "Mutable")) {
           return "Unset";
         }
         return leftMut;
       }
     }
-    if (expr.is("Postfix")) {
+    if (expr.is("postfix")) {
       const postfix = expr.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const access = postfix.getMemberAccess();
         const memberName = this.extractMemberName(access.target);
         if (memberName) {
@@ -8732,7 +8593,7 @@ var TypeInference = class {
         const ptr = type.getPointer();
         const normalizedTarget = this.normalizeType(ptr.target);
         if (normalizedTarget !== ptr.target) {
-          return AST4.TypeNode.asPointer(type.span, normalizedTarget, ptr.mutable);
+          return AST3.TypeNode.asPointer(type.span, normalizedTarget, ptr.mutable);
         }
         return type;
       }
@@ -8740,7 +8601,7 @@ var TypeInference = class {
         const opt = type.getOptional();
         const normalizedTarget = this.normalizeType(opt.target);
         if (normalizedTarget !== opt.target) {
-          return AST4.TypeNode.asOptional(type.span, normalizedTarget);
+          return AST3.TypeNode.asOptional(type.span, normalizedTarget);
         }
         return type;
       }
@@ -8748,7 +8609,7 @@ var TypeInference = class {
         const arr = type.getArray();
         const normalizedTarget = this.normalizeType(arr.target);
         if (normalizedTarget !== arr.target) {
-          return AST4.TypeNode.asArray(type.span, normalizedTarget, arr.size);
+          return AST3.TypeNode.asArray(type.span, normalizedTarget, arr.size);
         }
         return type;
       }
@@ -8757,7 +8618,7 @@ var TypeInference = class {
         const normalizedFields = tuple.fields.map((f) => this.normalizeType(f));
         const hasChanges = normalizedFields.some((nf, i) => nf !== tuple.fields[i]);
         if (hasChanges) {
-          return AST4.TypeNode.asTuple(type.span, normalizedFields);
+          return AST3.TypeNode.asTuple(type.span, normalizedFields);
         }
         return type;
       }
@@ -8767,7 +8628,7 @@ var TypeInference = class {
         const normalizedReturn = func.returnType ? this.normalizeType(func.returnType) : null;
         const hasChanges = normalizedParams.some((np, i) => np !== func.params[i]) || normalizedReturn && normalizedReturn !== func.returnType;
         if (hasChanges) {
-          return AST4.TypeNode.asFunction(
+          return AST3.TypeNode.asFunction(
             type.span,
             normalizedParams,
             normalizedReturn || void 0
@@ -8780,7 +8641,7 @@ var TypeInference = class {
         const normalizedTypes = union.types.map((t) => this.normalizeType(t));
         const hasChanges = normalizedTypes.some((nt, i) => nt !== union.types[i]);
         if (hasChanges) {
-          return AST4.TypeNode.asUnion(type.span, normalizedTypes);
+          return AST3.TypeNode.asUnion(type.span, normalizedTypes);
         }
         return type;
       }
@@ -8790,51 +8651,51 @@ var TypeInference = class {
   }
   extractMemberName(memberExpr) {
     switch (memberExpr.kind) {
-      case "Primary": {
+      case "primary": {
         const src = memberExpr.getPrimary();
-        if (src.kind === "Ident") {
+        if (src.kind === "ident") {
           return src.getIdent().name;
         }
         return null;
       }
-      case "Prefix": {
+      case "prefix": {
         const src = memberExpr.getPrefix();
         return this.extractMemberName(src.expr);
       }
-      case "Postfix": {
+      case "postfix": {
         const src = memberExpr.getPostfix();
         switch (src.kind) {
-          case "MemberAccess": {
+          case "memberAccess": {
             const access = src.getMemberAccess();
             return this.extractMemberName(access.target);
           }
-          case "Call": {
+          case "call": {
             const call = src.getCall();
             return this.extractMemberName(call.base);
           }
-          case "ArrayAccess": {
+          case "arrayAccess": {
             const index = src.getArrayAccess();
             return this.extractMemberName(index.base);
           }
-          case "Increment":
-          case "Decrement":
-          case "Dereference": {
+          case "increment":
+          case "decrement":
+          case "dereference": {
             return this.extractMemberName(src.getAsExprNode());
           }
           default:
             return null;
         }
       }
-      case "Binary":
-      case "As":
-      case "Orelse":
-      case "Range":
-      case "Try":
-      case "Catch":
-      case "If":
-      case "Match":
-      case "Typeof":
-      case "Sizeof":
+      case "binary":
+      case "as":
+      case "orelse":
+      case "range":
+      case "try":
+      case "catch":
+      case "if":
+      case "match":
+      case "typeof":
+      case "sizeof":
         return null;
       default:
         this.log("verbose", `Cannot extract member name from expression kind: ${memberExpr.kind}`);
@@ -8842,18 +8703,18 @@ var TypeInference = class {
     }
   }
   isStaticMemberAccess(baseExpr) {
-    if (!baseExpr.is("Primary")) return false;
+    if (!baseExpr.is("primary")) return false;
     const primary = baseExpr.getPrimary();
-    if (!(primary == null ? void 0 : primary.is("Ident"))) return false;
+    if (!(primary == null ? void 0 : primary.is("ident"))) return false;
     const ident = primary.getIdent();
     if (!ident) return false;
     const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
     return (symbol == null ? void 0 : symbol.kind) === "Definition" /* Definition */;
   }
   findCallTargetSymbol(baseExpr) {
-    if (baseExpr.is("Primary")) {
+    if (baseExpr.is("primary")) {
       const primary = baseExpr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if (ident && !ident.builtin) {
           return this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -9005,29 +8866,29 @@ var TypeValidator = class extends PhaseBase {
         this.config.services.contextTracker.withSavedState(() => {
           this.config.services.contextTracker.setScope(currentScope.id);
           this.processStmtByKind(stmt, {
-            "Block": (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
-            "Test": (testNode) => this.handleTestStmt(testNode, currentScope, moduleName),
-            "Def": (defNode) => this.handleDefStmt(defNode, currentScope, moduleName),
-            "Let": (letNode) => this.handleLetStmt(letNode, currentScope, moduleName),
-            "Func": (funcNode) => this.handleFuncStmt(funcNode, currentScope, moduleName),
-            "Expression": (exprNode) => {
+            "section": (n) => this.validateSectionStmt(n, currentScope, moduleName),
+            "block": (n) => this.validateBlockStmt(n, currentScope, moduleName),
+            "test": (n) => this.handleTestStmt(n, currentScope, moduleName),
+            "def": (n) => this.handleDefStmt(n, currentScope, moduleName),
+            "let": (n) => this.handleLetStmt(n, currentScope, moduleName),
+            "func": (n) => this.handleFuncStmt(n, currentScope, moduleName),
+            "expression": (n) => {
               const expr = stmt.getExpr();
               this.validateUnreachableExpression(expr);
-              if (expr.kind === "Binary") {
+              if (expr.kind === "binary") {
                 const binary = expr.getBinary();
-                if (binary && binary.kind === "Assignment") {
+                if (binary && binary.kind === "assignment") {
                   this.validateAssignment(binary);
                 }
               }
               this.typeInference.inferExpressionType(expr);
             },
-            // special cases
-            "While": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Do": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "For": () => this.handleLoopStmt(stmt, currentScope, moduleName),
-            "Return": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Defer": () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-            "Throw": () => this.handleControlflowStmt(stmt, currentScope, moduleName)
+            "while": (n) => this.validateWhileStmt(n),
+            "do": (n) => this.validateDoStmt(n),
+            "for": (n) => this.validateForStmt(n),
+            "return": (n) => this.validateReturnStmt(n),
+            "defer": (n) => this.validateDeferStmt(n),
+            "throw": (n) => this.validateThrowStmt(n)
           });
         });
       });
@@ -9043,12 +8904,9 @@ var TypeValidator = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
-  handleBlockStmt(blockNode, scope, moduleName) {
-    this.handleStatement(blockNode, this.validateBlockStmt.bind(this), scope, moduleName);
-  }
   validateBlockStmt(block, scope, moduleName) {
     this.log("symbols", "Validating block");
-    const blockScope = this.config.services.scopeManager.findChildScopeByName("block", "Block" /* Block */);
+    const blockScope = this.config.services.scopeManager.findChildScopeByName("block", "block" /* Block */);
     if (blockScope) {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.contextTracker.setScope(blockScope.id);
@@ -9072,6 +8930,31 @@ var TypeValidator = class extends PhaseBase {
         });
       });
     }
+  }
+  validateSectionStmt(section, scope, moduleName) {
+    this.log("symbols", "Validating section");
+    const currentScope = this.config.services.scopeManager.getCurrentScope();
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.contextTracker.setScope(currentScope.id);
+      this.config.services.scopeManager.withScope(currentScope.id, () => {
+        let reachedUnreachablePoint = false;
+        for (let i = 0; i < section.stmts.length; i++) {
+          const stmt = section.stmts[i];
+          if (reachedUnreachablePoint) {
+            this.reportError(
+              "UNREACHABLE_CODE" /* UNREACHABLE_CODE */,
+              "Unreachable code detected",
+              stmt.span
+            );
+            continue;
+          }
+          this.validateStmt(stmt, currentScope);
+          if (this.statementAlwaysExits(stmt)) {
+            reachedUnreachablePoint = true;
+          }
+        }
+      });
+    });
   }
   handleTestStmt(testNode, scope, moduleName) {
     this.validateBlockStmt(testNode.block, scope, moduleName);
@@ -9101,9 +8984,9 @@ var TypeValidator = class extends PhaseBase {
     this.handleStatement(letNode, this.validateLetStmt.bind(this), scope, moduleName);
   }
   validateArrayLiteralWithTargetType(initExpr, targetType, contextName) {
-    if (!initExpr.is("Primary")) return true;
+    if (!initExpr.is("primary")) return true;
     const primary = initExpr.getPrimary();
-    if (!(primary == null ? void 0 : primary.is("Literal"))) return true;
+    if (!(primary == null ? void 0 : primary.is("literal"))) return true;
     const literal = primary.getLiteral();
     if ((literal == null ? void 0 : literal.kind) !== "Array") return true;
     const elements = literal.value;
@@ -9151,7 +9034,7 @@ var TypeValidator = class extends PhaseBase {
     const currentScope = this.config.services.scopeManager.getCurrentScope();
     if (letNode.field.visibility.kind === "Static") {
       const currentScope2 = this.config.services.scopeManager.getCurrentScope();
-      if (currentScope2.kind !== "Type" /* Type */) {
+      if (currentScope2.kind !== "type" /* Type */) {
         this.reportError(
           "INVALID_VISIBILITY" /* INVALID_VISIBILITY */,
           `Variable '${letNode.field.ident.name}' cannot be 'static' outside of struct/enum`,
@@ -9199,9 +9082,9 @@ var TypeValidator = class extends PhaseBase {
         );
       }
     } else if (letNode.field.initializer && !letNode.field.type) {
-      if (letNode.field.initializer.is("Primary")) {
+      if (letNode.field.initializer.is("primary")) {
         const primary = letNode.field.initializer.getPrimary();
-        if (primary && primary.is("Object")) {
+        if (primary && primary.is("object")) {
           const obj = primary.getObject();
           if (obj.ident) {
             const typeSymbol = this.config.services.scopeManager.lookupSymbol(obj.ident.name);
@@ -9260,9 +9143,9 @@ var TypeValidator = class extends PhaseBase {
           );
         }
       }
-      if (letNode.field.initializer.is("Postfix")) {
+      if (letNode.field.initializer.is("postfix")) {
         const postfix = letNode.field.initializer.getPostfix();
-        if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+        if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
           const access = postfix.getMemberAccess();
           const baseType = this.typeInference.inferExpressionType(access.base);
           if (baseType) {
@@ -9286,6 +9169,8 @@ var TypeValidator = class extends PhaseBase {
         letNode.field.span
       );
     }
+    if (symbol.type)
+      letNode.field.type = symbol.type;
     this.markSymbolAsTypeChecked(symbol);
   }
   // └──────────────────────────────────────────────────────────────────────┘
@@ -9315,7 +9200,7 @@ var TypeValidator = class extends PhaseBase {
       return;
     }
     const funcSymbolScope = this.config.services.scopeManager.getScope(funcSymbol.scope);
-    const parentScope = funcSymbolScope.kind === "Type" /* Type */ && ((_a = funcSymbolScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" ? funcSymbolScope : null;
+    const parentScope = funcSymbolScope.kind === "type" /* Type */ && ((_a = funcSymbolScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" ? funcSymbolScope : null;
     const isStaticMethod = parentScope !== null && funcNode.visibility.kind === "Static";
     const isInstanceMethod = parentScope !== null && !(funcNode.visibility.kind === "Static");
     const previousIsStaticMethod = this.currentIsStaticMethod;
@@ -9355,11 +9240,11 @@ var TypeValidator = class extends PhaseBase {
                   `Cannot infer type for parameter '${param.ident.name}'`,
                   param.span
                 );
-                paramTypes.push(AST5.TypeNode.asUndefined(param.span));
+                paramTypes.push(AST4.TypeNode.asUndefined(param.span));
               }
             }
           }
-          funcSymbol.type = AST5.TypeNode.asFunction(
+          funcSymbol.type = AST4.TypeNode.asFunction(
             funcNode.span,
             paramTypes,
             (_b2 = (_a2 = funcNode.returnType) != null ? _a2 : this.currentFunctionReturnType) != null ? _b2 : void 0
@@ -9391,7 +9276,7 @@ var TypeValidator = class extends PhaseBase {
               if (this.currentFunctionReturnType) {
                 funcSymbol.type.getFunction().returnType = this.currentFunctionReturnType;
               } else {
-                funcSymbol.type.getFunction().returnType = AST5.TypeNode.asVoid(funcNode.span);
+                funcSymbol.type.getFunction().returnType = AST4.TypeNode.asVoid(funcNode.span);
               }
             }
           }
@@ -9471,9 +9356,9 @@ var TypeValidator = class extends PhaseBase {
           );
         }
       }
-      if (paramNode.initializer.is("Postfix")) {
+      if (paramNode.initializer.is("postfix")) {
         const postfix = paramNode.initializer.getPostfix();
-        if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+        if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
           const access = postfix.getMemberAccess();
           const baseType = this.typeInference.inferExpressionType(access.base);
           if (baseType) {
@@ -9520,47 +9405,58 @@ var TypeValidator = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌───────────────────────────── [3.6] LOOP ─────────────────────────────┐
-  handleLoopStmt(stmt, scope, moduleName) {
-    if (stmt.getLoop === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "While": {
-          const src = data.source;
-          const loop = AST5.LoopStmtNode.createWhile(data.span, src.expr, src.stmt);
-          this.validateLoopStmt(loop);
-          break;
-        }
-        case "Do": {
-          const src = data.source;
-          const loop = AST5.LoopStmtNode.createDo(data.span, src.expr, src.stmt);
-          this.validateLoopStmt(loop);
-          break;
-        }
-        case "For": {
-          const src = data.source;
-          const loop = AST5.LoopStmtNode.createFor(data.span, src.expr, src.stmt);
-          this.validateLoopStmt(loop);
-          break;
-        }
-      }
-    } else {
-      this.validateLoopStmt(stmt.getLoop());
-    }
-  }
-  validateLoopStmt(loopStmt) {
-    const loopScope = this.config.services.scopeManager.findChildScopeByName("loop", "Loop" /* Loop */);
+  validateWhileStmt(n) {
+    const loopScope = this.config.services.scopeManager.findChildScopeByName("while", "Loop" /* Loop */);
     if (!loopScope) return;
     this.config.services.contextTracker.withSavedState(() => {
       this.config.services.scopeManager.withScope(loopScope.id, () => {
         this.config.services.contextTracker.enterLoop();
-        if (loopStmt.expr) {
-          const condType = this.typeInference.inferExpressionType(loopStmt.expr);
-          if (loopStmt.kind === "While" && condType && !condType.isBool()) {
-            this.log("verbose", `Loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+        if (n.expr) {
+          const condType = this.typeInference.inferExpressionType(n.expr);
+          if (condType && !condType.isBool()) {
+            this.log("verbose", `While loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
           }
         }
-        if (loopStmt.stmt) {
-          this.validateStmt(loopStmt.stmt);
+        if (n.stmt) {
+          this.validateStmt(n.stmt);
+        }
+      });
+      this.config.services.contextTracker.exitLoop();
+    });
+  }
+  validateDoStmt(n) {
+    const loopScope = this.config.services.scopeManager.findChildScopeByName("do", "Loop" /* Loop */);
+    if (!loopScope) return;
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.scopeManager.withScope(loopScope.id, () => {
+        this.config.services.contextTracker.enterLoop();
+        if (n.expr) {
+          const condType = this.typeInference.inferExpressionType(n.expr);
+          if (condType && !condType.isBool()) {
+            this.log("verbose", `Do loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+          }
+        }
+        if (n.stmt) {
+          this.validateStmt(n.stmt);
+        }
+      });
+      this.config.services.contextTracker.exitLoop();
+    });
+  }
+  validateForStmt(n) {
+    const loopScope = this.config.services.scopeManager.findChildScopeByName("for", "Loop" /* Loop */);
+    if (!loopScope) return;
+    this.config.services.contextTracker.withSavedState(() => {
+      this.config.services.scopeManager.withScope(loopScope.id, () => {
+        this.config.services.contextTracker.enterLoop();
+        if (n.expr) {
+          const condType = this.typeInference.inferExpressionType(n.expr);
+          if (condType && !condType.isBool()) {
+            this.log("verbose", `Do loop condition has type ${this.typeInference.getTypeDisplayName(condType)}, not bool`);
+          }
+        }
+        if (n.stmt) {
+          this.validateStmt(n.stmt);
         }
       });
       this.config.services.contextTracker.exitLoop();
@@ -9568,87 +9464,47 @@ var TypeValidator = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
-  handleControlflowStmt(stmt, scope, moduleName) {
-    if (stmt.getCtrlflow === void 0) {
-      const data = stmt;
-      switch (stmt.kind) {
-        case "Return": {
-          const src = data.source;
-          const res = AST5.ControlFlowStmtNode.asReturn(data.span, src.value);
-          this.validateReturnStmt(res);
-          break;
-        }
-        case "Defer": {
-          const src = data.source;
-          const res = AST5.ControlFlowStmtNode.asDefer(data.span, src.value);
-          this.validateDeferStmt(res);
-          break;
-        }
-        case "Throw": {
-          const src = data.source;
-          const res = AST5.ControlFlowStmtNode.asThrow(data.span, src.value);
-          this.validateThrowStmt(res);
-          break;
-        }
-      }
-    } else {
-      switch (stmt.getCtrlflow().kind) {
-        case "return": {
-          this.validateReturnStmt(stmt.getCtrlflow());
-          break;
-        }
-        case "defer": {
-          this.validateDeferStmt(stmt.getCtrlflow());
-          break;
-        }
-        case "throw": {
-          this.validateThrowStmt(stmt.getCtrlflow());
-          break;
-        }
-      }
-    }
-  }
   validateReturnStmt(returnNode) {
     this.log("symbols", "Validating return statement");
     this.stats.returnsValidated++;
     this.hasReturnStatement = true;
     const isInFunction = this.isInsideFunctionScope();
-    if (returnNode.value) {
-      const isConstructor = this.typeInference.isConstructorExpression(returnNode.value);
-      if (!isConstructor && this.typeInference.isTypeExpression(returnNode.value)) {
+    if (returnNode.expr) {
+      const isConstructor = this.typeInference.isConstructorExpression(returnNode.expr);
+      if (!isConstructor && this.typeInference.isTypeExpression(returnNode.expr)) {
         const functionReturnsType = this.currentFunctionReturnType && this.typeInference.isTypeType(this.currentFunctionReturnType);
         if (!functionReturnsType) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
             `Cannot return a type as a value. Expected a value of type '${this.currentFunctionReturnType ? this.typeInference.getTypeDisplayName(this.currentFunctionReturnType) : "void"}', got type expression`,
-            returnNode.value.span
+            returnNode.expr.span
           );
           return;
         }
       }
       if (isInFunction && this.currentFunctionReturnType) {
         if (!this.validateTypeAssignment(
-          returnNode.value,
+          returnNode.expr,
           this.currentFunctionReturnType,
           "Return value"
         )) {
           return;
         }
       }
-      const returnType = this.typeInference.inferExpressionType(returnNode.value);
+      const returnType = this.typeInference.inferExpressionType(returnNode.expr);
       if (!returnType && this.config.services.diagnosticManager.hasErrors()) {
         return;
       }
       if (isInFunction && this.currentFunctionReturnType) {
-        if (returnType && !this.typeInference.isTypeCompatible(this.currentFunctionReturnType, returnType, returnNode.value)) {
+        if (returnType && !this.typeInference.isTypeCompatible(this.currentFunctionReturnType, returnType, returnNode.expr)) {
           this.reportError(
             "TYPE_MISMATCH" /* TYPE_MISMATCH */,
             `Return type '${this.typeInference.getTypeDisplayName(returnType)}' doesn't match function return type '${this.typeInference.getTypeDisplayName(this.currentFunctionReturnType)}'`,
-            returnNode.value.span
+            returnNode.expr.span
           );
         }
       } else if (!isInFunction) {
-        this.validateFunctionScope(returnNode, "Return");
+        this.validateFunctionScope(returnNode, "return");
       }
     } else {
       if (isInFunction && this.currentFunctionReturnType && !this.currentFunctionReturnType.isVoid()) {
@@ -9658,20 +9514,20 @@ var TypeValidator = class extends PhaseBase {
           returnNode.span
         );
       } else if (!isInFunction) {
-        this.validateFunctionScope(returnNode, "Return");
+        this.validateFunctionScope(returnNode, "return");
       }
     }
   }
   validateDeferStmt(deferNode) {
-    if (deferNode.value) {
-      this.typeInference.inferExpressionType(deferNode.value);
+    if (deferNode.expr) {
+      this.typeInference.inferExpressionType(deferNode.expr);
     }
-    this.validateFunctionScope(deferNode, "Defer");
+    this.validateFunctionScope(deferNode, "defer");
   }
   validateThrowStmt(throwNode) {
     this.log("symbols", "Validating throw statement");
     this.hasThrowStatement = true;
-    if (!this.validateFunctionScope(throwNode, "Throw")) {
+    if (!this.validateFunctionScope(throwNode, "throw")) {
       return;
     }
     const functionErrorType = this.getCurrentFunctionErrorType();
@@ -9683,13 +9539,13 @@ var TypeValidator = class extends PhaseBase {
       );
       return;
     }
-    if (throwNode.value) {
-      const thrownType = this.typeInference.inferExpressionType(throwNode.value);
+    if (throwNode.expr) {
+      const thrownType = this.typeInference.inferExpressionType(throwNode.expr);
       if (!thrownType) {
-        this.validateThrowExpression(throwNode.value, functionErrorType, throwNode.value.span);
+        this.validateThrowExpression(throwNode.expr, functionErrorType, throwNode.expr.span);
         return;
       }
-      this.validateThrowType(thrownType, functionErrorType, throwNode.value, throwNode.value.span);
+      this.validateThrowType(thrownType, functionErrorType, throwNode.expr, throwNode.expr.span);
     } else {
       this.reportError(
         "ANALYSIS_ERROR" /* ANALYSIS_ERROR */,
@@ -9752,13 +9608,13 @@ var TypeValidator = class extends PhaseBase {
     }
   }
   isValidErrorExpression(expr, expectedType) {
-    if (expr.is("Postfix")) {
+    if (expr.is("postfix")) {
       const postfix = expr.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const memberAccess = postfix.getMemberAccess();
-        if (memberAccess.base.is("Primary")) {
+        if (memberAccess.base.is("primary")) {
           const primary = memberAccess.base.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const ident = primary.getIdent();
             if (expectedType.isIdent()) {
               const expectedIdent = expectedType.getIdent();
@@ -9773,9 +9629,9 @@ var TypeValidator = class extends PhaseBase {
         }
       }
     }
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if (expectedType.isIdent()) {
           const expectedIdent = expectedType.getIdent();
@@ -9802,9 +9658,9 @@ var TypeValidator = class extends PhaseBase {
         break;
       case "err-ident":
       case "err-group": {
-        if (throwExpr.is("Primary")) {
+        if (throwExpr.is("primary")) {
           const primary = throwExpr.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const thrownIdent = primary.getIdent().name;
             if (functionErrorType.isIdent()) {
               const funcIdent = functionErrorType.getIdent().name;
@@ -9816,9 +9672,9 @@ var TypeValidator = class extends PhaseBase {
         }
         let thrownErrorName = "";
         let thrownErrorSet = null;
-        if (throwExpr.is("Primary")) {
+        if (throwExpr.is("primary")) {
           const primary = throwExpr.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const thrownIdent = primary.getIdent().name;
             thrownErrorName = thrownIdent;
             const thrownSymbol = this.config.services.scopeManager.lookupSymbol(thrownIdent);
@@ -9827,9 +9683,9 @@ var TypeValidator = class extends PhaseBase {
             }
           }
         }
-        if (throwExpr.is("Postfix")) {
+        if (throwExpr.is("postfix")) {
           const postfix = throwExpr.getPostfix();
-          if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+          if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
             const memberAccess = postfix.getMemberAccess();
             thrownErrorName = this.typeInference.extractMemberName(memberAccess.target) || "";
             const baseType = this.typeInference.inferExpressionType(memberAccess.base);
@@ -9935,24 +9791,24 @@ var TypeValidator = class extends PhaseBase {
     return parentScope.symbols.get(currentScope.name) || null;
   }
   extractErrorMemberName(thrownExpr) {
-    if (thrownExpr.is("Primary")) {
+    if (thrownExpr.is("primary")) {
       const primary = thrownExpr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         return primary.getIdent().name;
       }
     }
-    if (thrownExpr.is("Postfix")) {
+    if (thrownExpr.is("postfix")) {
       const postfix = thrownExpr.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const memberAccess = postfix.getMemberAccess();
-        if (memberAccess.base.is("Primary")) {
+        if (memberAccess.base.is("primary")) {
           const primary = memberAccess.base.getPrimary();
-          if (primary == null ? void 0 : primary.is("Ident")) {
+          if (primary == null ? void 0 : primary.is("ident")) {
             const ident = primary.getIdent();
             if ((ident == null ? void 0 : ident.name) === "selferr") {
-              if (memberAccess.target.is("Primary")) {
+              if (memberAccess.target.is("primary")) {
                 const targetPrimary = memberAccess.target.getPrimary();
-                if (targetPrimary == null ? void 0 : targetPrimary.is("Ident")) {
+                if (targetPrimary == null ? void 0 : targetPrimary.is("ident")) {
                   return targetPrimary.getIdent().name;
                 }
               }
@@ -10106,11 +9962,11 @@ var TypeValidator = class extends PhaseBase {
     return true;
   }
   validateAssignment(binary) {
-    if (binary.kind !== "Assignment") return;
+    if (binary.kind !== "assignment") return;
     this.stats.assignmentsValidated++;
-    if (binary.left.is("Postfix")) {
+    if (binary.left.is("postfix")) {
       const postfix = binary.left.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "Dereference") {
+      if ((postfix == null ? void 0 : postfix.kind) === "dereference") {
         const ptrExpr = postfix.getAsExprNode();
         const ptrType = this.typeInference.inferExpressionType(ptrExpr);
         if (ptrType) {
@@ -10147,9 +10003,9 @@ var TypeValidator = class extends PhaseBase {
     }
   }
   validateUnreachableExpression(expr) {
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if ((primary == null ? void 0 : primary.kind) === "Unreachable") {
+      if ((primary == null ? void 0 : primary.kind) === "unreachable") {
         const isInAppropriateContext = this.isInAppropriateUnreachableContext(expr);
         if (!isInAppropriateContext) {
           this.reportError(
@@ -10258,7 +10114,7 @@ var TypeValidator = class extends PhaseBase {
         "Failed to extract builtin name",
         call.base.span
       );
-      return AST5.TypeNode.asVoid(call.span);
+      return AST4.TypeNode.asVoid(call.span);
     }
     const globalScope = this.config.services.scopeManager.getGlobalScope();
     const builtinSymbol = globalScope.symbols.get(builtinName);
@@ -10268,7 +10124,7 @@ var TypeValidator = class extends PhaseBase {
         `Unknown builtin function '${builtinName}'`,
         call.base.span
       );
-      return AST5.TypeNode.asVoid(call.span);
+      return AST4.TypeNode.asVoid(call.span);
     }
     const funcType = builtinSymbol.type;
     if (!funcType.isFunction()) {
@@ -10277,7 +10133,7 @@ var TypeValidator = class extends PhaseBase {
         `'${builtinName}' is not callable`,
         call.base.span
       );
-      return AST5.TypeNode.asVoid(call.span);
+      return AST4.TypeNode.asVoid(call.span);
     }
     const func = funcType.getFunction();
     if (builtinName === "@i") {
@@ -10290,7 +10146,7 @@ var TypeValidator = class extends PhaseBase {
         `Builtin '${builtinName}' expects ${func.params.length} argument(s), but got ${call.args.length}`,
         call.args.length ? { start: call.args[0].span.start, end: call.args[call.args.length - 1].span.end } : call.span
       );
-      return func.returnType || AST5.TypeNode.asVoid(call.span);
+      return func.returnType || AST4.TypeNode.asVoid(call.span);
     }
     for (let i = 0; i < func.params.length; i++) {
       const paramType = func.params[i];
@@ -10305,7 +10161,7 @@ var TypeValidator = class extends PhaseBase {
         );
       }
     }
-    return func.returnType || AST5.TypeNode.asVoid(call.span);
+    return func.returnType || AST4.TypeNode.asVoid(call.span);
   }
   validateLoopIndexCall(call, builtinSymbol) {
     if (!this.config.services.contextTracker.isInLoop()) {
@@ -10314,18 +10170,18 @@ var TypeValidator = class extends PhaseBase {
         "Builtin '@i' can only be used inside a loop context",
         call.base.span
       );
-      return AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      return AST4.TypeNode.asUnsigned(call.span, "usize", 64);
     }
     const func = builtinSymbol.type.getFunction();
     const currentLoopDepth = this.config.services.contextTracker.getLoopDepth();
     if (call.args.length === 0) {
-      return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
     }
     if (call.args.length === 1) {
       const arg = call.args[0];
       const argType = this.typeInference.inferExpressionType(arg);
       if (!argType) {
-        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+        return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
       }
       const argValue = this.evaluateConstantExpression(arg);
       if (argValue !== null && typeof argValue === "number" && argValue < 0) {
@@ -10334,7 +10190,7 @@ var TypeValidator = class extends PhaseBase {
           "Loop index must be non-negative, got " + argValue,
           arg.span
         );
-        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+        return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
       }
       if (!this.typeInference.isTypeCompatible(func.params[0], argType)) {
         this.reportError(
@@ -10342,7 +10198,7 @@ var TypeValidator = class extends PhaseBase {
           `Argument type '${this.typeInference.getTypeDisplayName(argType)}' is not compatible with parameter type '${this.typeInference.getTypeDisplayName(func.params[0])}'`,
           arg.span
         );
-        return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+        return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
       }
       if (argValue !== null && typeof argValue === "number" && argValue >= currentLoopDepth) {
         this.reportError(
@@ -10351,19 +10207,19 @@ var TypeValidator = class extends PhaseBase {
           arg.span
         );
       }
-      return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+      return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
     }
     this.reportError(
       "TOO_MANY_ARGUMENTS" /* TOO_MANY_ARGUMENTS */,
       `Builtin '@i' expects at most 1 argument, but got ${call.args.length}`,
       call.args.length > 1 ? { start: call.args[1].span.start, end: call.args[call.args.length - 1].span.end } : call.span
     );
-    return func.returnType || AST5.TypeNode.asUnsigned(call.span, "usize", 64);
+    return func.returnType || AST4.TypeNode.asUnsigned(call.span, "usize", 64);
   }
   evaluateConstantExpression(expr) {
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Literal")) {
+      if (primary == null ? void 0 : primary.is("literal")) {
         const literal = primary.getLiteral();
         if ((literal == null ? void 0 : literal.kind) === "Integer") {
           try {
@@ -10455,7 +10311,7 @@ var TypeValidator = class extends PhaseBase {
         );
       }
     }
-    return func.returnType || AST5.TypeNode.asVoid(call.span);
+    return func.returnType || AST4.TypeNode.asVoid(call.span);
   }
   validateMethodCall(call, methodSymbol, structScope, baseExpr) {
     var _a;
@@ -10499,7 +10355,7 @@ var TypeValidator = class extends PhaseBase {
         );
       }
     }
-    return funcType.returnType || AST5.TypeNode.asVoid(call.span);
+    return funcType.returnType || AST4.TypeNode.asVoid(call.span);
   }
   // ===== SPECIAL EXPRESSIONS =====
   validateIntegerRangeExpr(expr, rangeType, span) {
@@ -10525,13 +10381,13 @@ var TypeValidator = class extends PhaseBase {
       }
     }
     if (!typeScope && structType.name && structType.name !== "Anonymous") {
-      typeScope = this.config.services.scopeManager.findScopeByName(structType.name, "Type" /* Type */);
+      typeScope = this.config.services.scopeManager.findScopeByName(structType.name, "type" /* Type */);
     }
     if (!typeScope) {
       typeScope = this.config.services.scopeManager.findChildScopeByNameFromId(
         symbol.name,
         symbol.scope,
-        "Type" /* Type */
+        "type" /* Type */
       );
     }
     if (!typeScope) {
@@ -10592,9 +10448,9 @@ var TypeValidator = class extends PhaseBase {
               } else if (!field.type && initType) {
                 field.type = initType;
               }
-              if (field.initializer.is("Postfix")) {
+              if (field.initializer.is("postfix")) {
                 const postfix = field.initializer.getPostfix();
-                if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+                if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
                   const access = postfix.getMemberAccess();
                   const baseType = this.typeInference.inferExpressionType(access.base);
                   if (baseType) {
@@ -10708,7 +10564,7 @@ var TypeValidator = class extends PhaseBase {
     return !hasMissingFields;
   }
   validateEnumType(enumType, symbol) {
-    const typeScope = this.config.services.scopeManager.findChildScopeByName(symbol.name, "Type" /* Type */);
+    const typeScope = this.config.services.scopeManager.findChildScopeByName(symbol.name, "type" /* Type */);
     if (!typeScope) return;
     this.config.services.contextTracker.withSavedState(() => {
       this.config.services.scopeManager.withScope(typeScope.id, () => {
@@ -11040,15 +10896,15 @@ var TypeValidator = class extends PhaseBase {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
   extractTypeFromInitializer(expr) {
-    if (expr.kind !== "Primary") return null;
+    if (expr.kind !== "primary") return null;
     const primary = expr.getPrimary();
-    if (!primary || primary.kind !== "Type") return null;
+    if (!primary || primary.kind !== "type") return null;
     return primary.getType();
   }
   extractSymbolFromExpression(expr) {
-    if (expr.is("Primary")) {
+    if (expr.is("primary")) {
       const primary = expr.getPrimary();
-      if (primary == null ? void 0 : primary.is("Ident")) {
+      if (primary == null ? void 0 : primary.is("ident")) {
         const ident = primary.getIdent();
         if (ident) {
           return this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -11058,16 +10914,16 @@ var TypeValidator = class extends PhaseBase {
     return null;
   }
   extractBuiltinName(expr) {
-    if (expr.kind !== "Primary") return null;
+    if (expr.kind !== "primary") return null;
     const primary = expr.getPrimary();
-    if (!primary || primary.kind !== "Ident") return null;
+    if (!primary || primary.kind !== "ident") return null;
     const ident = primary.getIdent();
     return ((ident == null ? void 0 : ident.name) ? "@" + ident.name : null) || null;
   }
   extractEnumVariantName(expr) {
-    if (expr.is("Postfix")) {
+    if (expr.is("postfix")) {
       const postfix = expr.getPostfix();
-      if ((postfix == null ? void 0 : postfix.kind) === "MemberAccess") {
+      if ((postfix == null ? void 0 : postfix.kind) === "memberAccess") {
         const access = postfix.getMemberAccess();
         return this.typeInference.extractMemberName(access.target);
       }
@@ -11095,29 +10951,29 @@ var TypeValidator = class extends PhaseBase {
   statementAlwaysExits(stmt) {
     var _a;
     switch (stmt.kind) {
-      case "Return":
-      case "Throw":
+      case "return":
+      case "throw":
         return true;
-      case "Expression": {
+      case "expression": {
         const expr = stmt.getExpr();
-        if (expr == null ? void 0 : expr.is("Primary")) {
+        if (expr == null ? void 0 : expr.is("primary")) {
           const primary = expr.getPrimary();
-          if ((primary == null ? void 0 : primary.kind) === "Unreachable") {
+          if ((primary == null ? void 0 : primary.kind) === "unreachable") {
             return true;
           }
         }
         return false;
       }
-      case "Block": {
+      case "block": {
         const block = (_a = stmt.getBlock) == null ? void 0 : _a.call(stmt);
         if (block) {
           return this.blockAlwaysExits(block);
         }
         return false;
       }
-      case "While":
-      case "Do":
-      case "For":
+      case "while":
+      case "do":
+      case "for":
         return false;
       default:
         return false;
@@ -11193,7 +11049,6 @@ var TypeValidator = class extends PhaseBase {
       typeCache: /* @__PURE__ */ new Map()
     };
   }
-  // Common validation helpers
   validateTypeCompatibility(target, source, context, span, sourceExpr) {
     if (this.typeInference.isTypeCompatible(target, source, sourceExpr)) {
       return true;
@@ -11253,7 +11108,6 @@ var TypeValidator = class extends PhaseBase {
   logSymbolValidation(action, symbolName) {
     this.log("symbols", `${action} '${symbolName}'`);
   }
-  // Helper method to eliminate symbol validation duplication
   handleStatement(stmt, validator, scope, moduleName) {
     validator(stmt);
   }
@@ -11448,7 +11302,7 @@ var SemanticValidator = class extends PhaseBase {
       this.config.services.contextTracker.setCurrentContextSpan(symbol.contextSpan);
       if (symbol.kind === "Function" /* Function */) {
         const parentScope = this.config.services.scopeManager.getScope(symbol.scope);
-        if (parentScope.kind === "Type" /* Type */) {
+        if (parentScope.kind === "type" /* Type */) {
           if (symbol.visibility.kind === "Static") {
             return;
           }
@@ -11511,7 +11365,7 @@ var SemanticValidator = class extends PhaseBase {
   checkCircularImports(moduleName, module2) {
     const importedModules = /* @__PURE__ */ new Set();
     for (const stmt of module2.statements) {
-      if (stmt.kind === "Use") {
+      if (stmt.kind === "use") {
         const useNode = stmt.getUse();
         if (useNode.path) {
           const importedModule = this.findModuleByPath(useNode.path);
@@ -11537,7 +11391,7 @@ var SemanticValidator = class extends PhaseBase {
     const module2 = this.config.program.modules.get(currentModule);
     if (!module2) return false;
     for (const stmt of module2.statements) {
-      if (stmt.kind === "Use") {
+      if (stmt.kind === "use") {
         const useNode = stmt.getUse();
         if (useNode.path) {
           const importedModule = this.findModuleByPath(useNode.path);
@@ -11656,19 +11510,19 @@ var Analyzer = class _Analyzer {
   // ┌──────────────────────── MAIN ANALYSIS INTERFACE ───────────────────┐
   /**
    * Analyze a program through all configured phases
-   * @param program The AST program to analyze
+   * @param new_program The AST program to analyze
    * @param config Optional runtime configuration overrides
    * @returns Analysis result with diagnostics and metadata
    */
-  analyze(program, config) {
+  analyze(new_program, config) {
     const startTime = Date.now();
     this.log("verbose", "\u{1F50D} Starting multi-phase analysis...");
     try {
-      const effectiveConfig = __spreadValues(__spreadValues({}, this.config), config);
-      if (!this.validateProgramStructure(program)) {
+      if (new_program !== null) this.config.program = new_program;
+      if (!this.validateProgramStructure(this.config.program)) {
         return this.createErrorResult("Invalid program structure", "Collection" /* Collection */);
       }
-      this.config.program = program;
+      this.config = __spreadValues(__spreadValues({}, this.config), config);
       const phases = [
         { phase: "Collection" /* Collection */, executor: () => this.executePhase1() },
         { phase: "Resolution" /* Resolution */, executor: () => this.executePhase2() },
@@ -11678,19 +11532,19 @@ var Analyzer = class _Analyzer {
       let completedPhase = "Collection" /* Collection */;
       let shouldContinue = true;
       for (const { phase, executor } of phases) {
-        if (!shouldContinue || this.shouldStopAtPhase(phase, effectiveConfig.stopAtPhase)) {
+        if (!shouldContinue || this.shouldStopAtPhase(phase, this.config.stopAtPhase)) {
           break;
         }
         const phaseResult = this.runPhase(phase, executor);
         completedPhase = phase;
         if (!phaseResult.success) {
-          if (effectiveConfig.strictMode) {
+          if (this.config.strictMode) {
             this.log("errors", `\u274C Stopping analysis at phase ${phase} due to errors (strict mode)`);
             shouldContinue = false;
           }
         }
-        if (this.config.services.diagnosticManager.length() >= effectiveConfig.maxErrors) {
-          this.log("errors", `\u26A0\uFE0F Stopping analysis due to error limit (${effectiveConfig.maxErrors})`);
+        if (this.config.services.diagnosticManager.length() >= this.config.maxErrors) {
+          this.log("errors", `\u26A0\uFE0F Stopping analysis due to error limit (${this.config.maxErrors})`);
           shouldContinue = false;
         }
       }
@@ -11699,10 +11553,10 @@ var Analyzer = class _Analyzer {
       this.log(
         "verbose",
         `Analysis completed in ${totalTime}ms
-   Success: ${result.success}
-   Errors: ${result.diagnostics.filter((d) => d.kind === "error").length}
-   Warnings: ${result.diagnostics.filter((d) => d.kind === "warning").length}
-   Completed phase: ${completedPhase}`
+   Success         : ${result.success}
+   Errors          : ${result.diagnostics.filter((d) => d.kind === "error").length}
+   Warnings        : ${result.diagnostics.filter((d) => d.kind === "warning").length}
+   Completed phase : ${completedPhase}`
       );
       for (const diagnostic of result.diagnostics) {
         this.log("errors", `${diagnostic.kind}: ${diagnostic.msg}`);
@@ -11715,21 +11569,34 @@ var Analyzer = class _Analyzer {
   }
   createServices(config) {
     var _a, _b;
-    const debugManager = new DebugManager(void 0, (_a = config == null ? void 0 : config.debug) != null ? _a : "off");
+    const debugManager = new DebugManager(void 0, (_a = config.debug) != null ? _a : "off");
     const contextTracker = new ContextTracker(debugManager);
-    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config == null ? void 0 : config.strictMode) != null ? _b : false);
-    const scopeManager = new ScopeManager(diagnosticManager, debugManager);
+    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config.strictMode) != null ? _b : false);
+    if (config.builtin === void 0) throw new Error("Builtin symbols must be provided");
+    const scopeManager = new ScopeManager(debugManager, config.builtin);
     return { debugManager, contextTracker, diagnosticManager, scopeManager };
   }
   createConfig(config) {
-    var _a, _b, _c, _d, _e;
-    return {
+    var _a, _b, _c, _d, _e, _f;
+    if (!config.program) {
+      throw new Error("Program must be provided");
+    }
+    const config_without_services = {
       debug: (_a = config.debug) != null ? _a : "off",
       stopAtPhase: (_b = config.stopAtPhase) != null ? _b : "SemanticValidation" /* SemanticValidation */,
       strictMode: (_c = config.strictMode) != null ? _c : false,
       maxErrors: (_d = config.maxErrors) != null ? _d : 100,
-      services: this.createServices(config),
-      program: (_e = config.program) != null ? _e : null
+      program: (_e = config.program) != null ? _e : null,
+      builtin: (_f = config.builtin) != null ? _f : { types: [], functions: [] }
+    };
+    return {
+      debug: config_without_services.debug,
+      stopAtPhase: config_without_services.stopAtPhase,
+      strictMode: config_without_services.strictMode,
+      maxErrors: config_without_services.maxErrors,
+      program: config_without_services.program,
+      builtin: config_without_services.builtin,
+      services: this.createServices(config_without_services)
     };
   }
   // └────────────────────────────────────────────────────────────────────┘
@@ -11827,7 +11694,6 @@ var Analyzer = class _Analyzer {
     this.config.services.diagnosticManager.reset();
     this.config.services.debugManager.reset();
     this.config.services.scopeManager.reset();
-    this.config.program = null;
     this.symbolCollector.reset();
     this.symbolResolver.reset();
     this.typeValidator.reset();

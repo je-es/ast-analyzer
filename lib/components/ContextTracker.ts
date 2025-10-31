@@ -77,7 +77,7 @@
         FinalValidation         = 'FinalValidation'
     }
 
-    export type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
+    export type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'use' | 'def';
 
     export interface SavedContextState {
         scopeId                 : ScopeId;
@@ -322,7 +322,7 @@
             startDeclaration(
                 symbolName: string,
                 symbolId: SymbolId,
-                symbolKind: ContextSymbolKind | 'Use',
+                symbolKind: ContextSymbolKind | 'use',
                 span: AST.Span,
                 parentScope: ScopeId
             ): void {

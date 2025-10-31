@@ -15,6 +15,7 @@
     import { SymbolResolver }                       from './phases/SymbolResolver';
     import { TypeValidator }                        from './phases/TypeValidator/TypeValidator';
     import { SemanticValidator }                    from './phases/SemanticValidator';
+    import { BuiltinConfig }                        from '@je-es/syntax';
 
     // Re-export
     export * from './components/DiagnosticManager';
@@ -41,7 +42,9 @@
 
         services            : AnalysisServices;
 
-        program             : AST.Program | null;
+        program             : AST.Program;
+
+        builtin             : BuiltinConfig;
     }
 
     /** Analysis result with diagnostics and metadata */
@@ -141,28 +144,25 @@
 
             /**
              * Analyze a program through all configured phases
-             * @param program The AST program to analyze
+             * @param new_program The AST program to analyze
              * @param config Optional runtime configuration overrides
              * @returns Analysis result with diagnostics and metadata
              */
-            analyze(program: AST.Program, config?: Partial<AnalysisConfig>): AnalysisResult {
+            analyze(new_program: AST.Program | null, config?: Partial<AnalysisConfig>): AnalysisResult {
                 const startTime = Date.now();
                 this.log('verbose', '🔍 Starting multi-phase analysis...');
 
                 try {
-                    // Apply runtime config overrides
-                    const effectiveConfig = { ...this.config, ...config };
-
-                    // Reset all components
-                    // this.reset();
+                    // Set the program
+                    if(new_program !== null) this.config.program = new_program;
 
                     // Validate program structure
-                    if (!this.validateProgramStructure(program)) {
+                    if (!this.validateProgramStructure(this.config.program)) {
                         return this.createErrorResult('Invalid program structure', AnalysisPhase.Collection);
                     }
 
-                    // Set the program
-                    this.config.program = program;
+                    // Apply runtime config overrides
+                    this.config = { ...this.config, ...config };
 
                     // Execute phases in order
                     const phases: Array<{ phase: AnalysisPhase, executor: () => boolean }> = [
@@ -177,7 +177,7 @@
                     let shouldContinue = true;
 
                     for (const { phase, executor } of phases) {
-                        if (!shouldContinue || this.shouldStopAtPhase(phase, effectiveConfig.stopAtPhase)) {
+                        if (!shouldContinue || this.shouldStopAtPhase(phase, this.config.stopAtPhase)) {
                             break;
                         }
 
@@ -186,15 +186,15 @@
 
                         // Check if we should continue
                         if (!phaseResult.success) {
-                            if (effectiveConfig.strictMode) {
+                            if (this.config.strictMode) {
                                 this.log('errors', `❌ Stopping analysis at phase ${phase} due to errors (strict mode)`);
                                 shouldContinue = false;
                             }
                         }
 
                         // Check error limit
-                        if (this.config.services.diagnosticManager.length() >= effectiveConfig.maxErrors) {
-                            this.log('errors', `⚠️ Stopping analysis due to error limit (${effectiveConfig.maxErrors})`);
+                        if (this.config.services.diagnosticManager.length() >= this.config.maxErrors) {
+                            this.log('errors', `⚠️ Stopping analysis due to error limit (${this.config.maxErrors})`);
                             shouldContinue = false;
                         }
                     }
@@ -205,10 +205,10 @@
 
                     this.log('verbose',
                         `Analysis completed in ${totalTime}ms\n` +
-                        `   Success: ${result.success}\n` +
-                        `   Errors: ${result.diagnostics.filter(d => d.kind === 'error').length}\n` +
-                        `   Warnings: ${result.diagnostics.filter(d => d.kind === 'warning').length}\n` +
-                        `   Completed phase: ${completedPhase}`
+                        `   Success         : ${result.success}\n` +
+                        `   Errors          : ${result.diagnostics.filter(d => d.kind === 'error').length}\n` +
+                        `   Warnings        : ${result.diagnostics.filter(d => d.kind === 'warning').length}\n` +
+                        `   Completed phase : ${completedPhase}`
                     );
 
                     // if we have errors log it
@@ -224,24 +224,38 @@
                 }
             }
 
-            private createServices(config ?: Partial<AnalysisConfig>): AnalysisServices {
-                const debugManager       = new DebugManager(undefined, config?.debug ?? 'off');
+            private createServices(config : Partial<AnalysisConfig>): AnalysisServices {
+                const debugManager       = new DebugManager(undefined, config.debug ?? 'off');
                 const contextTracker     = new ContextTracker(debugManager);
-                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config?.strictMode ?? false);
-                const scopeManager       = new ScopeManager(diagnosticManager, debugManager);
+                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config.strictMode ?? false);
+                if(config.builtin === undefined) throw new Error('Builtin symbols must be provided');
+                const scopeManager       = new ScopeManager(debugManager, config.builtin!);
 
                 return { debugManager, contextTracker, diagnosticManager, scopeManager }
             }
 
             private createConfig(config: Partial<AnalysisConfig>): Required<AnalysisConfig> {
-                return {
+                if(!config.program) {
+                    throw new Error("Program must be provided")
+                }
+                const config_without_services : Partial<AnalysisConfig> = {
                     debug           : config.debug          ?? 'off',
                     stopAtPhase     : config.stopAtPhase    ?? AnalysisPhase.SemanticValidation,
                     strictMode      : config.strictMode     ?? false,
                     maxErrors       : config.maxErrors      ?? 100,
-                    services        : this.createServices(config),
-                    program         : config.program     ?? null,
+                    program         : config.program        ?? null,
+                    builtin         : config.builtin        ?? { types: [], functions: [] },
                 };
+
+                return {
+                    debug           : config_without_services.debug!,
+                    stopAtPhase     : config_without_services.stopAtPhase!,
+                    strictMode      : config_without_services.strictMode!,
+                    maxErrors       : config_without_services.maxErrors!,
+                    program         : config_without_services.program!,
+                    builtin         : config_without_services.builtin!,
+                    services        : this.createServices(config_without_services)
+                }
             }
 
         // └────────────────────────────────────────────────────────────────────┘
@@ -366,8 +380,6 @@
                 this.config.services.diagnosticManager.reset();
                 this.config.services.debugManager.reset();
                 this.config.services.scopeManager.reset();
-
-                this.config.program = null;
 
                 this.symbolCollector.reset();
                 this.symbolResolver.reset();

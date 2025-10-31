@@ -152,24 +152,24 @@
 
                 try {
                     switch (expr.kind) {
-                        case 'Primary':
+                        case 'primary':
                             return this.evaluatePrimary(expr.getPrimary()!, context);
-                        case 'Binary':
+                        case 'binary':
                             return this.evaluateBinary(expr.getBinary()!, context);
-                        case 'Prefix':
+                        case 'prefix':
                             return this.evaluatePrefix(expr.getPrefix()!, context);
-                        case 'Postfix': {
+                        case 'postfix': {
                             const postfix = expr.getPostfix();
 
-                            if (postfix?.kind === 'Call') {
+                            if (postfix?.kind === 'call') {
                                 return this.evaluateComptimeFunctionCall(postfix.getCall()!, context);
                             }
 
                             return null;
                         }
-                        case 'As':
+                        case 'as':
                             return this.evaluateAs(expr.getAs()!, context);
-                        case 'Sizeof':
+                        case 'sizeof':
                             return this.evaluateSizeof(expr.getSizeof()!, context);
                         default:
                             return null;
@@ -191,11 +191,11 @@
 
             private evaluatePrimary(primary: AST.PrimaryNode, ctx: EvaluationContext): EvaluationResult | null {
                 switch (primary.kind) {
-                    case 'Literal':
+                    case 'literal':
                         return this.evaluateLiteral(primary.getLiteral()!, ctx);
-                    case 'Ident':
+                    case 'ident':
                         return this.evaluateIdentifier(primary.getIdent()!, ctx);
-                    case 'Paren': {
+                    case 'paren': {
                         const paren = primary.getParen()!;
                         return paren.source ? this.evaluateExpression(paren.source, ctx) : null;
                     }
@@ -330,23 +330,23 @@
                 }
 
                 switch (binary.kind) {
-                    case 'Additive':
+                    case 'additive':
                         return this.evaluateAdditive(left, right, binary.operator, binary.span);
-                    case 'Multiplicative':
+                    case 'multiplicative':
                         return this.evaluateMultiplicative(left, right, binary.operator, binary.span);
-                    case 'Power':
+                    case 'power':
                         return this.evaluatePower(left, right, binary.span);
-                    case 'Shift':
+                    case 'shift':
                         return this.evaluateShift(left, right, binary.operator, binary.span);
-                    case 'BitwiseAnd':
-                    case 'BitwiseXor':
-                    case 'BitwiseOr':
+                    case 'bitwiseAnd':
+                    case 'bitwiseXor':
+                    case 'bitwiseOr':
                         return this.evaluateBitwise(left, right, binary.kind, binary.span);
-                    case 'Relational':
-                    case 'Equality':
+                    case 'relational':
+                    case 'equality':
                         return this.evaluateComparison(left, right, binary.operator, binary.span);
-                    case 'LogicalAnd':
-                    case 'LogicalOr':
+                    case 'logicalAnd':
+                    case 'logicalOr':
                         return this.evaluateLogical(left, right, binary.kind, binary.span);
                     default:
                         return null;
@@ -611,7 +611,7 @@
             private evaluateBitwise(
                 left: EvaluationResult,
                 right: EvaluationResult,
-                op: 'BitwiseAnd' | 'BitwiseXor' | 'BitwiseOr',
+                op: 'bitwiseAnd' | 'bitwiseXor' | 'bitwiseOr',
                 span: AST.Span
             ): EvaluationResult | null {
                 if (left.type !== 'int' || right.type !== 'int') {
@@ -628,9 +628,9 @@
 
                 let result: bigint;
                 switch (op) {
-                    case 'BitwiseAnd': result = l & r; break;
-                    case 'BitwiseXor': result = l ^ r; break;
-                    case 'BitwiseOr': result = l | r; break;
+                    case 'bitwiseAnd': result = l & r; break;
+                    case 'bitwiseXor': result = l ^ r; break;
+                    case 'bitwiseOr': result = l | r; break;
                 }
 
                 return { value: result, type: 'int' };
@@ -675,7 +675,7 @@
             private evaluateLogical(
                 left: EvaluationResult,
                 right: EvaluationResult,
-                op: 'LogicalAnd' | 'LogicalOr',
+                op: 'logicalAnd' | 'logicalOr',
                 span: AST.Span
             ): EvaluationResult | null {
                 if (left.type !== 'bool' || right.type !== 'bool') {
@@ -690,7 +690,7 @@
                 const l = left.value as boolean;
                 const r = right.value as boolean;
 
-                const result = op === 'LogicalAnd' ? l && r : l || r;
+                const result = op === 'logicalAnd' ? l && r : l || r;
                 return { value: result, type: 'bool' };
             }
 
@@ -704,7 +704,7 @@
                 if (!value) return null;
 
                 switch (prefix.kind) {
-                    case 'UnaryPlus':
+                    case 'unaryPlus':
                         if (value.type !== 'int' && value.type !== 'float') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -715,7 +715,7 @@
                         }
                         return value;
 
-                    case 'UnaryMinus':
+                    case 'unaryMinus':
                         if (value.type !== 'int' && value.type !== 'float') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -742,7 +742,7 @@
                         }
                         return null;
 
-                    case 'LogicalNot':
+                    case 'logicalNot':
                         if (value.type !== 'bool') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -753,7 +753,7 @@
                         }
                         return { value: !(value.value as boolean), type: 'bool' };
 
-                    case 'BitwiseNot':
+                    case 'bitwiseNot':
                         if (value.type !== 'int') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -834,9 +834,9 @@
                         const initExpr = functionSymbol.metadata.initializer as AST.ExprNode;
 
                         // If initializer is an identifier, resolve it
-                        if (initExpr.is('Primary')) {
+                        if (initExpr.is('primary')) {
                             const primary = initExpr.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const targetIdent = primary.getIdent()!;
                                 const resolvedSymbol = this.config.services.scopeManager.lookupSymbol(targetIdent.name);
 
@@ -1055,7 +1055,7 @@
                 );
 
                 const processStatement = (stmt: AST.StmtNode): EvaluationResult | null => {
-                    if (stmt.kind === 'Let') {
+                    if (stmt.kind === 'let') {
                         const letNode = stmt.getLet();
                         if (letNode && letNode.field.initializer) {
                             const value = this.evaluateWithLocals(
@@ -1076,11 +1076,11 @@
                         }
                     }
 
-                    if (stmt.kind === 'Return') {
-                        const returnNode = stmt.getCtrlflow();
-                        if (returnNode?.value) {
+                    if (stmt.kind === 'return') {
+                        const returnNode = stmt.getReturn();
+                        if (returnNode?.expr) {
                             return this.evaluateWithLocals(
-                                returnNode.value,
+                                returnNode.expr,
                                 ctx,
                                 functionScope,
                                 localVariables
@@ -1088,7 +1088,7 @@
                         }
                     }
 
-                    if (stmt.kind === 'Expression') {
+                    if (stmt.kind === 'expression') {
                         const expr = stmt.getExpr();
                         if (expr) {
                             return this.evaluateWithLocals(
@@ -1103,7 +1103,7 @@
                     return null;
                 };
 
-                if (body.kind === 'Block') {
+                if (body.kind === 'block') {
                     const blockNode = body.getBlock();
                     if (!blockNode || blockNode.stmts.length === 0) {
                         return null;
@@ -1147,27 +1147,27 @@
             ): EvaluationResult | null {
                 try {
                     switch (expr.kind) {
-                        case 'Primary':
+                        case 'primary':
                             return this.evaluatePrimaryWithLocals(expr.getPrimary()!, ctx, scope, locals);
 
-                        case 'Binary':
+                        case 'binary':
                             return this.evaluateBinaryWithLocals(expr.getBinary()!, ctx, scope, locals);
 
-                        case 'Prefix':
+                        case 'prefix':
                             return this.evaluatePrefixWithLocals(expr.getPrefix()!, ctx, scope, locals);
 
-                        case 'Postfix': {
+                        case 'postfix': {
                             const postfix = expr.getPostfix();
-                            if (postfix?.kind === 'Call') {
+                            if (postfix?.kind === 'call') {
                                 return this.evaluateComptimeFunctionCall(postfix.getCall()!, ctx);
                             }
                             return null;
                         }
 
-                        case 'As':
+                        case 'as':
                             return this.evaluateAsWithLocals(expr.getAs()!, ctx, scope, locals);
 
-                        case 'Sizeof':
+                        case 'sizeof':
                             return this.evaluateSizeof(expr.getSizeof()!, ctx);
 
                         default:
@@ -1190,13 +1190,13 @@
                 locals: LocalVariableMap
             ): EvaluationResult | null {
                 switch (primary.kind) {
-                    case 'Literal':
+                    case 'literal':
                         return this.evaluateLiteral(primary.getLiteral()!, ctx);
 
-                    case 'Ident':
+                    case 'ident':
                         return this.evaluateIdentifierWithLocals(primary.getIdent()!, ctx, scope, locals);
 
-                    case 'Paren': {
+                    case 'paren': {
                         const paren = primary.getParen()!;
                         return paren.source ? this.evaluateWithLocals(paren.source, ctx, scope, locals) : null;
                     }
@@ -1258,23 +1258,23 @@
                 }
 
                 switch (binary.kind) {
-                    case 'Additive':
+                    case 'additive':
                         return this.evaluateAdditive(left, right, binary.operator, binary.span);
-                    case 'Multiplicative':
+                    case 'multiplicative':
                         return this.evaluateMultiplicative(left, right, binary.operator, binary.span);
-                    case 'Power':
+                    case 'power':
                         return this.evaluatePower(left, right, binary.span);
-                    case 'Shift':
+                    case 'shift':
                         return this.evaluateShift(left, right, binary.operator, binary.span);
-                    case 'BitwiseAnd':
-                    case 'BitwiseXor':
-                    case 'BitwiseOr':
+                    case 'bitwiseAnd':
+                    case 'bitwiseXor':
+                    case 'bitwiseOr':
                         return this.evaluateBitwise(left, right, binary.kind, binary.span);
-                    case 'Relational':
-                    case 'Equality':
+                    case 'relational':
+                    case 'equality':
                         return this.evaluateComparison(left, right, binary.operator, binary.span);
-                    case 'LogicalAnd':
-                    case 'LogicalOr':
+                    case 'logicalAnd':
+                    case 'logicalOr':
                         return this.evaluateLogical(left, right, binary.kind, binary.span);
                     default:
                         return null;
@@ -1291,7 +1291,7 @@
                 if (!value) return null;
 
                 switch (prefix.kind) {
-                    case 'UnaryPlus':
+                    case 'unaryPlus':
                         if (value.type !== 'int' && value.type !== 'float') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -1302,7 +1302,7 @@
                         }
                         return value;
 
-                    case 'UnaryMinus':
+                    case 'unaryMinus':
                         if (value.type !== 'int' && value.type !== 'float') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -1329,7 +1329,7 @@
                         }
                         return null;
 
-                    case 'LogicalNot':
+                    case 'logicalNot':
                         if (value.type !== 'bool') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -1340,7 +1340,7 @@
                         }
                         return { value: !(value.value as boolean), type: 'bool' };
 
-                    case 'BitwiseNot':
+                    case 'bitwiseNot':
                         if (value.type !== 'int') {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -1414,10 +1414,10 @@
             }
 
             private findCallTargetSymbol(baseExpr: AST.ExprNode): Symbol | null {
-                if (baseExpr.is('Primary')) {
+                if (baseExpr.is('primary')) {
                     const primary = baseExpr.getPrimary();
 
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent();
                         if (ident && !ident.builtin) {
                             return this.config.services.scopeManager.lookupSymbol(ident.name);

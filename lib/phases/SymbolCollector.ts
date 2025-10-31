@@ -83,6 +83,7 @@
                 } catch (error) {
                     this.log('errors', `Fatal error during symbol collection: ${error}`);
                     this.reportError( DiagCode.INTERNAL_ERROR, `Fatal error during symbol collection: ${error}` );
+                    console.error(error);
                     return false;
                 }
             }
@@ -189,22 +190,22 @@
 
                     // PASS 1: Collect all local definitions FIRST
                     for (const statement of module.statements) {
-                        if (statement.kind === 'Def' || statement.kind === 'Let' || statement.kind === 'Func') {
+                        if (statement.kind === 'def' || statement.kind === 'let' || statement.kind === 'func') {
                             this.collectStmt(statement, moduleScope, moduleName);
                         }
                     }
 
                     // PASS 2: Then process imports
                     for (const statement of module.statements) {
-                        if (statement.kind === 'Use') {
+                        if (statement.kind === 'use') {
                             this.collectStmt(statement, moduleScope, moduleName);
                         }
                     }
 
                     // PASS 3: Process everything else
                     for (const statement of module.statements) {
-                        if (statement.kind !== 'Def' && statement.kind !== 'Let' &&
-                            statement.kind !== 'Func' && statement.kind !== 'Use') {
+                        if (statement.kind !== 'def' && statement.kind !== 'let' &&
+                            statement.kind !== 'func' && statement.kind !== 'use') {
                             this.collectStmt(statement, moduleScope, moduleName);
                         }
                     }
@@ -245,22 +246,22 @@
                             this.config.services.contextTracker.setScope(currentScope.id);
 
                             this.processStmtByKind(stmt, {
-                                'Block'     : (blockNode) => this.handleBlockStmt(blockNode, currentScope, moduleName),
-                                'Test'      : (testNode)  => this.handleTestStmt(testNode, currentScope, moduleName),
-                                'Use'       : (useNode)   => this.handleUseStmt(useNode, currentScope, moduleName),
-                                'Def'       : (defNode)   => this.handleDefStmt(defNode, currentScope, moduleName),
-                                'Let'       : (letNode)   => this.handleLetStmt(letNode, currentScope, moduleName),
-                                'Func'      : (funcNode)  => this.handleFuncStmt(funcNode, currentScope, moduleName),
-                                'Expression': (exprNode)  => this.collectExpr(exprNode, currentScope, moduleName),
+                                'section'   : (n) => this.collectSectionStmt(n, currentScope, moduleName),
+                                'block'     : (n) => this.collectBlockStmt(n, currentScope, moduleName),
+                                'test'      : (n) => this.collectTestStmt(n, currentScope, moduleName),
+                                'use'       : (n) => this.collectUseStmt(n, currentScope, moduleName),
+                                'def'       : (n) => this.collectDefStmt(n, currentScope, moduleName),
+                                'let'       : (n) => this.collectLetStmt(n, currentScope, moduleName),
+                                'func'      : (n) => this.collectFuncStmt(n, currentScope, moduleName),
+                                'expression': (n) => this.collectExpr(n, currentScope, moduleName),
 
-                                // special cases
-                                'While'     : () => this.handleLoopStmt(stmt, currentScope, moduleName),
-                                'Do'        : () => this.handleLoopStmt(stmt, currentScope, moduleName),
-                                'For'       : () => this.handleLoopStmt(stmt, currentScope, moduleName),
+                                'for'       : (n) => this.collectForStmt(n, currentScope, moduleName),
+                                'while'     : (n) => this.collectWhileStmt(n, currentScope, moduleName),
+                                'do'        : (n) => this.collectDoStmt(n, currentScope, moduleName),
 
-                                'Return'    : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-                                'Defer'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
-                                'Throw'     : () => this.handleControlflowStmt(stmt, currentScope, moduleName),
+                                'return'    : (n) => this.collectReturnStmt(n, currentScope, moduleName),
+                                'defer'     : (n) => this.collectDeferStmt(n, currentScope, moduleName),
+                                'throw'     : (n) => this.collectThrowStmt(n, currentScope, moduleName),
                             });
                         });
                     });
@@ -279,10 +280,6 @@
 
 
         // ┌──────────────────────────── [3.1] BLOCK ─────────────────────────────┐
-
-            private handleBlockStmt(blockNode: AST.BlockStmtNode, scope: Scope, moduleName: string): void {
-                this.collectBlockStmt(blockNode, scope, moduleName);
-            }
 
             private createBlockScope(parentScope: Scope): Scope {
                 const blockScope = this.config.services.scopeManager.createScope(ScopeKind.Block, 'block', parentScope.id);
@@ -305,7 +302,13 @@
                 });
             }
 
-            private handleTestStmt(testNode: AST.TestStmtNode, scope: Scope, moduleName: string): void {
+            private collectSectionStmt(sectionNode: AST.SectionStmtNode, parentScope: Scope, moduleName: string): void {
+                for (const stmt of sectionNode.stmts) {
+                    this.collectStmt(stmt, parentScope, moduleName);
+                }
+            }
+
+            private collectTestStmt(testNode: AST.TestStmtNode, scope: Scope, moduleName: string): void {
                 this.collectBlockStmt(testNode.block, scope, moduleName);
             }
 
@@ -313,10 +316,6 @@
 
 
         // ┌───────────────────────────── [3.2] USE ──────────────────────────────┐
-
-            private handleUseStmt(useNode: AST.UseStmtNode, scope: Scope, moduleName: string): void {
-                this.collectUseStmt(useNode, scope, moduleName);
-            }
 
             private createUseSymbol(
                 useNode: AST.UseStmtNode,
@@ -587,10 +586,6 @@
 
         // ┌───────────────────────────── [3.3] DEF ──────────────────────────────┐
 
-            private handleDefStmt(defNode: AST.DefStmtNode, scope: Scope, moduleName: string): void {
-                this.collectDefStmt(defNode, scope, moduleName);
-            }
-
             private createDefSymbol(defNode: AST.DefStmtNode, scope: Scope, moduleName: string): Symbol {
                 const symbol = this.createBaseSymbol(
                     defNode.ident.name,
@@ -637,10 +632,6 @@
 
 
         // ┌───────────────────────────── [3.4] LET ──────────────────────────────┐
-
-            private handleLetStmt(letNode: AST.LetStmtNode, scope: Scope, moduleName: string): void {
-                this.collectLetStmt(letNode, scope, moduleName);
-            }
 
             private createLetSymbol(varNode: AST.LetStmtNode, scope: Scope, moduleName: string): Symbol {
                 const symbol = this.createBaseSymbol(
@@ -721,13 +712,13 @@
             }
 
             private extractTypeFromInitializer(expr: AST.ExprNode): AST.TypeNode | null {
-                if (expr.kind !== 'Primary') return null;
+                if (expr.kind !== 'primary') return null;
 
                 const primary = expr.getPrimary();
                 if (!primary) return null;
 
                 // // Handle character literals
-                // if (primary.kind === 'Literal') {
+                // if (primary.kind === 'literal') {
                 //     const literal = primary.getLiteral();
                 //     if (literal && literal.kind === 'Character') {
                 //         const charValue = literal.value as string;
@@ -750,12 +741,12 @@
                 // }
 
                 // Handle anonymous types: struct { x: i32 }, enum { A, B }
-                if (primary.kind === 'Type') {
+                if (primary.kind === 'type') {
                     return primary.getType();
                 }
 
                 // Handle constructor syntax: Point { x: 10, y: 20 }
-                if (primary.kind === 'Object') {
+                if (primary.kind === 'object') {
                     const obj = primary.getObject();
                     if (!obj || !obj.ident) return null;
 
@@ -776,10 +767,6 @@
 
 
         // ┌───────────────────────────── [3.5] FUNC ─────────────────────────────┐
-
-            private handleFuncStmt(funcNode: AST.FuncStmtNode, scope: Scope, moduleName: string): void {
-                this.collectFuncStmt(funcNode, scope, moduleName);
-            }
 
             private determineErrorMode(errorType: AST.TypeNode): 'err-ident' | 'err-group' | 'any-error' | 'self-group' {
                 // CASE 1: Direct 'err' type -> any error
@@ -1093,67 +1080,59 @@
 
         // ┌───────────────────────────── [3.6] LOOP ─────────────────────────────┐
 
-            private handleLoopStmt(stmt: AST.StmtNode, scope: Scope, moduleName: string): void {
-                if(stmt.getLoop === undefined) {
-                    const data = stmt;
-                    switch (stmt.kind) {
-                        case 'While' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createWhile(data.span, src.expr, src.stmt);
-                            this.collectLoopStmt(loop, scope, moduleName);
-                            break;
-                        }
-                        case 'Do' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createDo(data.span, src.expr, src.stmt);
-                            this.collectLoopStmt(loop, scope, moduleName);
-                            break;
-                        }
-                        case 'For' : {
-                            const src = data.source as AST.LoopStmtNode;
-                            const loop = AST.LoopStmtNode.createFor(data.span, src.expr, src.stmt);
-                            this.collectLoopStmt(loop, scope, moduleName);
-                            break;
-                        }
-                    }
-                } else {
-                    this.collectLoopStmt(stmt.getLoop()!, scope, moduleName);
-                }
-            }
-
-            private createLoopScope(parentScope: Scope): Scope {
-                const loopScope = this.config.services.scopeManager.createScope(ScopeKind.Loop, 'loop', parentScope.id);
-                this.incrementScopesCreated();
-                this.log('scopes', `Created loop scope ${loopScope.id} under parent ${parentScope.id}`);
-                return loopScope;
-            }
-
-            private collectLoopStmt(loopNode: AST.LoopStmtNode, parentScope: Scope, moduleName: string): void {
-                const loopScope = this.createLoopScope(parentScope);
+            private collectForStmt(forNode: AST.ForStmtNode, parentScope: Scope, moduleName: string): void {
+                const loopScope = this.createLoopScope(parentScope, 'for');
 
                 this.config.services.scopeManager.withScope(loopScope.id, () => {
                     this.config.services.contextTracker.withSavedState(() => {
                         this.config.services.contextTracker.setScope(loopScope.id);
                         this.config.services.contextTracker.enterLoop();
 
-                        switch (loopNode.kind) {
-                            case 'While':
-                                this.collectExpr(loopNode.expr, loopScope, moduleName);
-                                this.collectStmt(loopNode.stmt, loopScope, moduleName);
-                                break;
-                            case 'Do':
-                                this.collectStmt(loopNode.stmt, loopScope, moduleName);
-                                this.collectExpr(loopNode.expr, loopScope, moduleName);
-                                break;
-                            case 'For':
-                                this.collectExpr(loopNode.expr, loopScope, moduleName);
-                                this.collectStmt(loopNode.stmt, loopScope, moduleName);
-                                break;
-                        }
+                        this.collectExpr(forNode.expr, loopScope, moduleName);
+                        this.collectStmt(forNode.stmt, loopScope, moduleName);
                     });
-                    
+
                     this.config.services.contextTracker.exitLoop();
                 });
+            }
+
+            private collectWhileStmt(whileNode: AST.WhileStmtNode, parentScope: Scope, moduleName: string): void {
+                const loopScope = this.createLoopScope(parentScope, 'while');
+
+                this.config.services.scopeManager.withScope(loopScope.id, () => {
+                    this.config.services.contextTracker.withSavedState(() => {
+                        this.config.services.contextTracker.setScope(loopScope.id);
+                        this.config.services.contextTracker.enterLoop();
+
+                        this.collectExpr(whileNode.expr, loopScope, moduleName);
+                        this.collectStmt(whileNode.stmt, loopScope, moduleName);
+                    });
+
+                    this.config.services.contextTracker.exitLoop();
+                });
+            }
+
+            private collectDoStmt(doNode: AST.DoStmtNode, parentScope: Scope, moduleName: string): void {
+                const loopScope = this.createLoopScope(parentScope, 'do');
+
+                this.config.services.scopeManager.withScope(loopScope.id, () => {
+                    this.config.services.contextTracker.withSavedState(() => {
+                        this.config.services.contextTracker.setScope(loopScope.id);
+                        this.config.services.contextTracker.enterLoop();
+
+                        this.collectExpr(doNode.expr, loopScope, moduleName);
+                        this.collectStmt(doNode.stmt, loopScope, moduleName);
+                    });
+
+                    this.config.services.contextTracker.exitLoop();
+                });
+            }
+
+            private createLoopScope(parentScope: Scope, mode: 'for' | 'while' | 'do'): Scope {
+                const loopScope = this.config.services.scopeManager.createScope(ScopeKind.Loop, 'loop', parentScope.id);
+                this.incrementScopesCreated();
+                this.log('scopes', `Created loop scope ${loopScope.id} under parent ${parentScope.id}`);
+                return loopScope;
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -1161,62 +1140,21 @@
 
         // ┌──────────────────────────── [3.7] CTRLFLOW ──────────────────────────┐
 
-            private handleControlflowStmt(stmt: AST.StmtNode, scope: Scope, moduleName: string): void {
-                if(stmt.getCtrlflow === undefined) {
-                    const data = stmt;
-                    switch (stmt.kind) {
-                        case 'Return' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asReturn(data.span, src.value);
-                            this.collectReturnStmt(res, scope, moduleName);
-                            break;
-                        }
-                        case 'Defer' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asDefer(data.span, src.value);
-                            this.collectDeferStmt(res, scope, moduleName);
-                            break;
-                        }
-                        case 'Throw' : {
-                            const src = data.source as AST.ControlFlowStmtNode;
-                            const res = AST.ControlFlowStmtNode.asThrow(data.span, src.value);
-                            this.collectThrowStmt(res, scope, moduleName);
-                            break;
-                        }
-                    }
-                } else {
-                    switch (stmt.getCtrlflow()!.kind) {
-                        case 'return' : {
-                            this.collectReturnStmt(stmt.getCtrlflow()!, scope, moduleName);
-                            break;
-                        }
-                        case 'defer' : {
-                            this.collectDeferStmt(stmt.getCtrlflow()!, scope, moduleName);
-                            break;
-                        }
-                        case 'throw' : {
-                            this.collectThrowStmt(stmt.getCtrlflow()!, scope, moduleName);
-                            break;
-                        }
-                    }
+            private collectReturnStmt(n: AST.ReturnStmtNode, scope: Scope, moduleName: string): void {
+                if (n.expr) {
+                    this.collectExpr(n.expr, scope, moduleName);
                 }
             }
 
-            private collectReturnStmt(returnNode: AST.ControlFlowStmtNode, scope: Scope, moduleName: string): void {
-                if (returnNode.value) {
-                    this.collectExpr(returnNode.value, scope, moduleName);
+            private collectDeferStmt(n: AST.DeferStmtNode, scope: Scope, moduleName: string): void {
+                if (n.expr) {
+                    this.collectExpr(n.expr, scope, moduleName);
                 }
             }
 
-            private collectDeferStmt(deferNode: AST.ControlFlowStmtNode, scope: Scope, moduleName: string): void {
-                if (deferNode.value) {
-                    this.collectExpr(deferNode.value, scope, moduleName);
-                }
-            }
-
-            private collectThrowStmt(throwNode: AST.ControlFlowStmtNode, scope: Scope, moduleName: string): void {
-                if (throwNode.value) {
-                    this.collectExpr(throwNode.value, scope, moduleName);
+            private collectThrowStmt(n: AST.ThrowStmtNode, scope: Scope, moduleName: string): void {
+                if (n.expr) {
+                    this.collectExpr(n.expr, scope, moduleName);
                 }
             }
 
@@ -1235,10 +1173,10 @@
                 let needsScope = false;
 
                 switch (expr.kind) {
-                    case 'If':
-                    case 'Match':
-                    case 'Try':
-                    case 'Catch':
+                    case 'if':
+                    case 'match':
+                    case 'try':
+                    case 'catch':
                         needsScope = true;
                         break;
                 }
@@ -1258,41 +1196,41 @@
 
             private processExprKind(expr: AST.ExprNode, scope: Scope, moduleName: string): void {
                 switch (expr.kind) {
-                    case 'As':
+                    case 'as':
                         this.handleAsExpr(expr.getAs()!, scope, moduleName);
                         break;
-                    case 'Typeof':
+                    case 'typeof':
                         return this.processExprKind(expr.getTypeof()!.expr, scope, moduleName);
-                    case 'Sizeof':
+                    case 'sizeof':
                         return this.processExprKind(expr.getSizeof()!.expr, scope, moduleName);
-                    case 'Orelse':
+                    case 'orelse':
                         this.handleOrelseExpr(expr.getOrelse()!, scope, moduleName);
                         break;
-                    case 'Range':
+                    case 'range':
                         this.handleRangeExpr(expr.getRange()!, scope, moduleName);
                         break;
-                    case 'Try':
+                    case 'try':
                         this.handleTryExpr(expr.getTry()!, scope, moduleName);
                         break;
-                    case 'Catch':
+                    case 'catch':
                         this.handleCatchExpr(expr.getCatch()!, scope, moduleName);
                         break;
-                    case 'If':
+                    case 'if':
                         this.handleIfExpr(expr.getIf()!, scope, moduleName);
                         break;
-                    case 'Match':
+                    case 'match':
                         this.handleSwitchExpr(expr.getMatch()!, scope, moduleName);
                         break;
-                    case 'Binary':
+                    case 'binary':
                         this.handleBinaryExpr(expr.getBinary()!, scope, moduleName);
                         break;
-                    case 'Postfix':
+                    case 'postfix':
                         this.handlePostfixExpr(expr.getPostfix()!, scope, moduleName);
                         break;
-                    case 'Prefix':
+                    case 'prefix':
                         this.handlePrefixExpr(expr.getPrefix()!, scope, moduleName);
                         break;
-                    case 'Primary':
+                    case 'primary':
                         this.handlePrimaryExpr(expr.getPrimary()!, scope, moduleName);
                         break;
                 }
@@ -1348,12 +1286,12 @@
 
             private handlePostfixExpr(postfixExpr: AST.PostfixNode, scope: Scope, moduleName: string): void {
                 switch(postfixExpr.kind) {
-                    case 'Increment':
-                    case 'Decrement':
-                    case 'Dereference':
+                    case 'increment':
+                    case 'decrement':
+                    case 'dereference':
                         this.collectExpr(postfixExpr.getAsExprNode()!, scope, moduleName);
                         break;
-                    case 'Call': {
+                    case 'call': {
                         const callExpr = postfixExpr.getCall()!;
                         this.collectExpr(callExpr.base, scope, moduleName);
                         for (const arg of callExpr.args) {
@@ -1361,13 +1299,13 @@
                         }
                         break;
                     }
-                    case 'ArrayAccess': {
+                    case 'arrayAccess': {
                         const arrayAccess = postfixExpr.getArrayAccess()!;
                         this.collectExpr(arrayAccess.base, scope, moduleName);
                         this.collectExpr(arrayAccess.index, scope, moduleName);
                         break;
                     }
-                    case 'MemberAccess': {
+                    case 'memberAccess': {
                         const memberAccess = postfixExpr.getMemberAccess()!;
                         this.collectExpr(memberAccess.base, scope, moduleName);
                         break;
@@ -1381,33 +1319,33 @@
 
             private handlePrimaryExpr(primaryExpr: AST.PrimaryNode, scope: Scope, moduleName: string): void {
                 switch(primaryExpr.kind) {
-                    case 'Ident': {
+                    case 'ident': {
                         const ident = primaryExpr.getIdent();
                         if (ident && ident.name === 'self') {
                             this.validateSelfUsage(scope, ident.span);
                         }
                         break;
                     }
-                    case 'Literal':
+                    case 'literal':
                         break;
-                    case 'Type': {
+                    case 'type': {
                         const type = primaryExpr.getType()!;
                         this.collectType(type, scope, moduleName);
                         break;
                     }
-                    case 'Paren': {
+                    case 'paren': {
                         const paren = primaryExpr.getParen()!;
                         this.collectExpr(paren.source, scope, moduleName);
                         break;
                     }
-                    case 'Tuple': {
+                    case 'tuple': {
                         const tuple = primaryExpr.getTuple()!;
                         for (const expr of tuple.fields) {
                             this.collectExpr(expr, scope, moduleName);
                         }
                         break;
                     }
-                    case 'Object': {
+                    case 'object': {
                         const object = primaryExpr.getObject()!;
                         if(object.ident) {
                             this.collectExpr(
@@ -1421,7 +1359,7 @@
                         }
                         break;
                     }
-                    case 'Unreachable': {
+                    case 'unreachable': {
                         // Unreachable expressions are handled in type validation phase
                         // No symbol collection needed for unreachable expressions
                         break;
@@ -1708,10 +1646,10 @@
                         const anonId = this.config.services.scopeManager.symbolIdGenerator.next();
                         const scopeName = `<union-struct-${anonId}>`;
                         const structScope = this.createTypeScope(scopeName, parentScope, 'Struct');
-                        
+
                         const struct = variant.getStruct()!;
                         struct.metadata = { ...struct.metadata, scopeId: structScope.id };
-                        
+
                         this.config.services.scopeManager.withScope(structScope.id, () => {
                             this.config.services.contextTracker.withSavedState(() => {
                                 this.config.services.contextTracker.setScope(structScope.id);
@@ -1819,7 +1757,7 @@
                 }
             }
 
-            private createErrorSymbol(identNode: AST.IdentNode, scope: Scope, moduleName: string): Symbol {
+            private createErrorSymbol(identNode: AST.NameInfo, scope: Scope, moduleName: string): Symbol {
                 return this.createBaseSymbol(
                     identNode.name,
                     SymbolKind.Error,
@@ -2003,17 +1941,17 @@
 
             private validateSymbolExistsInModule(module: AST.Module, symbolName: string): boolean {
                 for (const stmt of module.statements) {
-                    if (stmt.kind === 'Let') {
+                    if (stmt.kind === 'let') {
                         const varNode = stmt.getLet();
                         if (varNode && varNode.field.ident.name === symbolName) {
                             return true;
                         }
-                    } else if (stmt.kind === 'Func') {
+                    } else if (stmt.kind === 'func') {
                         const funcNode = stmt.getFunc();
                         if (funcNode && funcNode.ident.name === symbolName) {
                             return true;
                         }
-                    } else if (stmt.kind === 'Def') {
+                    } else if (stmt.kind === 'def') {
                         const defNode = stmt.getDef();
                         if (defNode && defNode.ident.name === symbolName) {
                             return true;
@@ -2063,15 +2001,15 @@
         // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             private init(): boolean {
-                this.pathContext.rootPath   = this.config.program!.metadata?.path as string | undefined;
-
-                this.config.services.contextTracker.reset();
-                this.config.services.contextTracker.setPhase(AnalysisPhase.Collection);
-
                 if (!this.config.program) {
                     this.reportError(DiagCode.ANALYSIS_ERROR, 'No program provided for analysis');
                     return false;
                 }
+
+                this.pathContext.rootPath = this.config.program!.metadata.path as string;
+
+                this.config.services.contextTracker.reset();
+                this.config.services.contextTracker.setPhase(AnalysisPhase.Collection);
 
                 try {
                     this.config.services.scopeManager.reset();

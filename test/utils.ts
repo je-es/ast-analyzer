@@ -9,7 +9,7 @@
     import * as ParseLib                from '@je-es/parser';
     import { ParseError }               from '@je-es/parser';
     import * as AST                     from '@je-es/ast';
-    import * as rules                   from '@kemet-lang/rules';
+    import * as sesh                    from '@kemet-lang/sesh';
     import { Analyzer, AnalysisPhase, Diagnostic, AnalysisResult, DiagCode, DiagKind }
                                         from '../lib/ast-analyzer';
 
@@ -37,7 +37,7 @@
 
     export function testAnalyzer(cases: AnalyzerTestCase, stopAtPhase: AnalysisPhase | undefined) {
         // [1] Create syntax
-        const syntax = rules.KemetSyntax.from('Root', 'off');
+        const syntax = sesh.KemetSyntax.from('Root', 'off');
 
         // [2.A] Create print module
         const printModuleInput = `
@@ -76,7 +76,7 @@
         const program = AST.Program.create([printModule], { entryModule: 'main', path: './' });
 
         // [3] Create analyzer
-        const analyzer = Analyzer.create({ debug: 'off', stopAtPhase });
+        const analyzer = Analyzer.create({ program, debug: 'off', stopAtPhase, builtin: sesh.KemetSyntax.config.builtin });
 
         let result : AnalysisResult = { success: false, diagnostics: [] };
         function check (MustBesuccess: boolean, MustBeDiag: Diagnostic[]) {
@@ -90,7 +90,7 @@
             for (let i = 0; i < (MustBeDiag as unknown[]).length; i++) {
                 const obj = (MustBeDiag as unknown[])[i] as any;
                 if(obj.msg)
-                expect(result.diagnostics[i].msg).toEqual(obj.msg);
+                expect(result.diagnostics[i].msg.toLowerCase()).toEqual(obj.msg.toLowerCase());
                 if(obj.code)
                 expect(result.diagnostics[i].code).toEqual(obj.code);
                 if(obj.kind)
@@ -141,7 +141,7 @@
 
                             // Analyze
                             analyzer.reset();
-                            result = analyzer.analyze(program);
+                            result = analyzer.analyze(program, { });
                         }
 
                         // Testing
@@ -165,7 +165,7 @@
         describe("EntryModule", () => {
             it("should detect no entry module", () => {
                 const program   = AST.Program.create( [], { entryModule: 'main', path: './' } );
-                const analyzer  = Analyzer.create({ debug: 'verbose' });
+                const analyzer  = Analyzer.create({ program, debug: 'off', builtin: sesh.KemetSyntax.config.builtin });
                 const result    = analyzer.analyze(program);
 
                 // TODO: improve this error code and msg (in SemanticValidator).

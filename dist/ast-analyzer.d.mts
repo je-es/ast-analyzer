@@ -1,5 +1,6 @@
 import * as AST from '@je-es/ast';
 import { Span } from '@je-es/ast';
+import { BuiltinConfig } from '@je-es/syntax';
 
 declare class IdGenerator {
     private counter;
@@ -29,19 +30,19 @@ declare enum ScopeKind {
     Module = "Module",
     Function = "Function",
     Loop = "Loop",
-    Block = "Block",
-    Expression = "Expression",
-    Type = "Type"
+    Block = "block",
+    Expression = "expression",
+    Type = "type"
 }
 declare enum SymbolKind {
-    Use = "Use",
+    Use = "use",
     Definition = "Definition",
     Variable = "Variable",
     Function = "Function",
     Parameter = "Parameter",
     StructField = "StructField",
     EnumVariant = "EnumVariant",
-    Type = "Type",
+    Type = "type",
     Error = "Error"
 }
 interface Scope {
@@ -100,8 +101,8 @@ interface BuiltinSymbolOption {
     type: AST.TypeNode | null;
 }
 declare class ScopeManager {
-    private readonly diagnosticManager;
-    private readonly debugManager?;
+    private debugManager;
+    private builtin;
     private static readonly SYMBOL_PROXIMITY_THRESHOLD;
     private scopes;
     private currentScope;
@@ -110,7 +111,7 @@ declare class ScopeManager {
     private namespaceLookup;
     readonly idGenerator: IdGenerator;
     readonly symbolIdGenerator: IdGenerator;
-    constructor(diagnosticManager: DiagnosticManager, debugManager?: DebugManager | undefined);
+    constructor(debugManager: DebugManager, builtin: BuiltinConfig);
     init(): void;
     reset(): void;
     createScope(kind: ScopeKind, name: string, parentId: ScopeId | null): Scope;
@@ -276,7 +277,7 @@ declare enum AnalysisPhase {
     SemanticValidation = "SemanticValidation",
     FinalValidation = "FinalValidation"
 }
-type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'Use' | 'def';
+type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'use' | 'def';
 interface SavedContextState {
     scopeId: ScopeId;
     moduleName: string;
@@ -313,7 +314,7 @@ declare class ContextTracker {
     pushContextSpan(span: AST.Span): void;
     popContextSpan(): AST.Span | undefined;
     clearContextSpans(): void;
-    startDeclaration(symbolName: string, symbolId: SymbolId, symbolKind: ContextSymbolKind | 'Use', span: AST.Span, parentScope: ScopeId): void;
+    startDeclaration(symbolName: string, symbolId: SymbolId, symbolKind: ContextSymbolKind | 'use', span: AST.Span, parentScope: ScopeId): void;
     startInitialization(symbolId: SymbolId): void;
     completeDeclaration(symbolId: SymbolId): void;
     isInDeclaration(symbolName: string): boolean;
@@ -521,7 +522,6 @@ declare class DiagnosticManager {
     private spansOverlap;
 }
 
-/** Abstract phase base class */
 declare abstract class PhaseBase {
     protected readonly phase: AnalysisPhase;
     protected readonly config: AnalysisConfig;
@@ -529,20 +529,12 @@ declare abstract class PhaseBase {
     abstract reset(): void;
     abstract handle(): boolean;
     abstract logStatistics(): void;
+    protected getNodeGetter(stmt: AST.StmtNode): (() => any) | null;
+    protected processStmtByKind<T>(stmt: AST.StmtNode, handlers: Partial<Record<AST.StmtNode['kind'], (node: any) => T>>): T | null;
     protected reportError(code: DiagCode, message: string, span?: AST.Span): void;
     protected reportWarning(code: DiagCode, message: string, span?: AST.Span): void;
     protected reportInfo(code: DiagCode, message: string, span?: AST.Span): void;
     protected log(kind: "verbose" | "symbols" | "scopes" | "errors" | undefined, message: string): void;
-    /**
-     * Extract getter function for statement node based on its kind.
-     * Returns null if the statement kind is invalid or unsupported.
-     */
-    protected getNodeGetter(stmt: AST.StmtNode): (() => any) | null;
-    /**
-     * Process a statement by delegating to kind-specific handlers.
-     * Returns the result of the handler or null if kind is unsupported.
-    */
-    protected processStmtByKind<T>(stmt: AST.StmtNode, handlers: Partial<Record<AST.StmtNode['kind'], (node: any) => T>>): T | null;
 }
 
 declare class SymbolCollector extends PhaseBase {
@@ -559,25 +551,21 @@ declare class SymbolCollector extends PhaseBase {
     private collectModule;
     private createModuleScope;
     private collectStmt;
-    private handleBlockStmt;
     private createBlockScope;
     private collectBlockStmt;
-    private handleTestStmt;
-    private handleUseStmt;
+    private collectSectionStmt;
+    private collectTestStmt;
     private createUseSymbol;
     private collectUseStmt;
     private extractImportSymbolName;
     private processModuleImport;
     private processWildcardImport;
     private processLocalUse;
-    private handleDefStmt;
     private createDefSymbol;
     private collectDefStmt;
-    private handleLetStmt;
     private createLetSymbol;
     private collectLetStmt;
     private extractTypeFromInitializer;
-    private handleFuncStmt;
     private determineErrorMode;
     private extractSelfGroupErrors;
     private createFuncSymbol;
@@ -587,10 +575,10 @@ declare class SymbolCollector extends PhaseBase {
     private collectParams;
     private injectSelfParameter;
     private injectSelfErrReference;
-    private handleLoopStmt;
+    private collectForStmt;
+    private collectWhileStmt;
+    private collectDoStmt;
     private createLoopScope;
-    private collectLoopStmt;
-    private handleControlflowStmt;
     private collectReturnStmt;
     private collectDeferStmt;
     private collectThrowStmt;
@@ -660,10 +648,9 @@ declare class SymbolResolver extends PhaseBase {
     private exitModuleContext;
     private findModuleScope;
     private resolveStmt;
-    private handleBlockStmt;
     private resolveBlockStmt;
-    private handleTestStmt;
-    private handleUseStmt;
+    private resolveSectionStmt;
+    private resolveTestStmt;
     private resolveUseStmt;
     private resolveModuleImport;
     private resolveModuleWithScope;
@@ -676,14 +663,11 @@ declare class SymbolResolver extends PhaseBase {
     private resolveMemberInType;
     private propagateImportType;
     private markAliasAsDeclared;
-    private handleDefStmt;
     private resolveDefStmt;
-    private handleLetStmt;
     private resolveLetStmt;
     private isConstructorExpression;
     private validateConstructorFields;
     private resolveVariableInitializer;
-    private handleFuncStmt;
     private resolveFuncStmt;
     private refineErrorMode;
     private extractSelfGroupErrors;
@@ -694,9 +678,9 @@ declare class SymbolResolver extends PhaseBase {
     private resolveFields;
     private resolveField;
     private resolveFieldInitializer;
-    private handleLoopStmt;
-    private resolveLoopStmt;
-    private handleControlflowStmt;
+    private resolveWhileStmt;
+    private resolveDoStmt;
+    private resolveForStmt;
     private resolveReturnStmt;
     private resolveDeferStmt;
     private resolveThrowStmt;
@@ -866,7 +850,7 @@ declare class TypeInference {
     getTypeDisplayName(type: AST.TypeNode): string;
     canConvertTypes(source: AST.TypeNode, target: AST.TypeNode): boolean;
     getExpectedTypeFromContext(): AST.TypeNode | null;
-    getExpressionMutability(expr: AST.ExprNode): 'Mutable' | 'Immutable' | 'Literal' | 'Unset';
+    getExpressionMutability(expr: AST.ExprNode): 'Mutable' | 'Immutable' | 'literal' | 'Unset';
     normalizeType(type: AST.TypeNode): AST.TypeNode;
     extractMemberName(memberExpr: AST.ExprNode): string | null;
     isStaticMemberAccess(baseExpr: AST.ExprNode): boolean;
@@ -915,8 +899,8 @@ declare class TypeValidator extends PhaseBase {
     enterModuleContext(moduleName: string, module: AST.Module): void;
     exitModuleContext(): void;
     validateStmt(stmt: AST.StmtNode, currentScope?: Scope, moduleName?: string): void;
-    handleBlockStmt(blockNode: AST.BlockStmtNode, scope?: Scope, moduleName?: string): void;
     validateBlockStmt(block: AST.BlockStmtNode, scope?: Scope, moduleName?: string): void;
+    validateSectionStmt(section: AST.SectionStmtNode, scope?: Scope, moduleName?: string): void;
     handleTestStmt(testNode: AST.TestStmtNode, scope: Scope, moduleName?: string): void;
     handleDefStmt(defNode: AST.DefStmtNode, scope?: Scope, moduleName?: string): void;
     validateDefStmt(defNode: AST.DefStmtNode): void;
@@ -927,12 +911,12 @@ declare class TypeValidator extends PhaseBase {
     validateFuncStmt(funcNode: AST.FuncStmtNode): void;
     validateParameter(paramNode: AST.FieldNode): void;
     resolveSelfParameter(funcScope: Scope, structScope: Scope): void;
-    handleLoopStmt(stmt: AST.StmtNode, scope?: Scope, moduleName?: string): void;
-    validateLoopStmt(loopStmt: AST.LoopStmtNode): void;
-    handleControlflowStmt(stmt: AST.StmtNode, scope?: Scope, moduleName?: string): void;
-    validateReturnStmt(returnNode: AST.ControlFlowStmtNode): void;
-    validateDeferStmt(deferNode: AST.ControlFlowStmtNode): void;
-    validateThrowStmt(throwNode: AST.ControlFlowStmtNode): void;
+    validateWhileStmt(n: AST.WhileStmtNode): void;
+    validateDoStmt(n: AST.DoStmtNode): void;
+    validateForStmt(n: AST.ForStmtNode): void;
+    validateReturnStmt(returnNode: AST.ReturnStmtNode): void;
+    validateDeferStmt(deferNode: AST.DeferStmtNode): void;
+    validateThrowStmt(throwNode: AST.ThrowStmtNode): void;
     validateThrowExpression(throwExpr: AST.ExprNode, functionErrorType: AST.TypeNode, span: AST.Span): void;
     isValidErrorExpression(expr: AST.ExprNode, expectedType: AST.TypeNode): boolean;
     validateThrowType(thrownType: AST.TypeNode, functionErrorType: AST.TypeNode, throwExpr: AST.ExprNode, span: AST.Span): void;
@@ -1029,7 +1013,8 @@ interface AnalysisConfig {
     /** Maximum number of errors before stopping */
     maxErrors?: number;
     services: AnalysisServices;
-    program: AST.Program | null;
+    program: AST.Program;
+    builtin: BuiltinConfig;
 }
 /** Analysis result with diagnostics and metadata */
 interface AnalysisResult {
@@ -1084,11 +1069,11 @@ declare class Analyzer {
     private log;
     /**
      * Analyze a program through all configured phases
-     * @param program The AST program to analyze
+     * @param new_program The AST program to analyze
      * @param config Optional runtime configuration overrides
      * @returns Analysis result with diagnostics and metadata
      */
-    analyze(program: AST.Program, config?: Partial<AnalysisConfig>): AnalysisResult;
+    analyze(new_program: AST.Program | null, config?: Partial<AnalysisConfig>): AnalysisResult;
     private createServices;
     private createConfig;
     private executePhase1;

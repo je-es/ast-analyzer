@@ -925,14 +925,6 @@
                 success: true,
                 diagnostics: [],
             },
-
-            // // Built-in sqrt
-            // {
-            //     name: 'Builtin sqrt function',
-            //     input: 'fn T_ST() { let x = @sqrt(16.0); }', // no more @sqrt
-            //     success: true,
-            //     diagnostics: [],
-            // },
         ],
     };
 
@@ -1543,7 +1535,7 @@
         Dummy: [
             {
                 name: 'Dummy test',
-                input: `let x = 1;`,
+                input: `@print("Hello World");`,
                 success: true,
                 diagnostics: [],
             }
@@ -1580,7 +1572,7 @@
         ...NestedStructTests,
         ...MultiModuleTests,
         ...CallValidationTests,
-        // ...Dummy,
+        ...Dummy,
     }, AnalysisPhase.Resolution);
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝

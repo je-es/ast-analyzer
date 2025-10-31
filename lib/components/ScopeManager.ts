@@ -6,6 +6,7 @@
 
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
+    import { BuiltinConfig }        from '@je-es/syntax';
     import * as AST                 from '@je-es/ast';
     import { IdGenerator }          from "./IdGenerator";
     import { DebugManager }         from './DebugManager';
@@ -25,20 +26,20 @@
         Module          = 'Module',
         Function        = 'Function',
         Loop            = 'Loop',
-        Block           = 'Block',
-        Expression      = 'Expression',
-        Type            = 'Type',
+        Block           = 'block',
+        Expression      = 'expression',
+        Type            = 'type',
     }
 
     export enum SymbolKind {
-        Use             = 'Use',
+        Use             = 'use',
         Definition      = 'Definition',
         Variable        = 'Variable',
         Function        = 'Function',
         Parameter       = 'Parameter',
         StructField     = 'StructField',
         EnumVariant     = 'EnumVariant',
-        Type            = 'Type',
+        Type            = 'type',
         Error           = 'Error'
     }
 
@@ -122,7 +123,7 @@
 
             private scopes!             : Map<ScopeId, Scope>;
             private currentScope!       : ScopeId;
-            private globalScope!        : Scope;
+            private globalScope!         : Scope;
             private symbolTable!        : Map<SymbolId, Symbol>;
             private namespaceLookup!    : Map<string, Set<SymbolId>>;
 
@@ -130,11 +131,12 @@
             readonly symbolIdGenerator  : IdGenerator;
 
             constructor(
-                private readonly diagnosticManager  : DiagnosticManager,
-                private readonly debugManager?      : DebugManager
+                private debugManager    : DebugManager,
+                private builtin         : BuiltinConfig
             ) {
                 this.idGenerator        = new IdGenerator();
                 this.symbolIdGenerator  = new IdGenerator();
+
                 this.init();
             }
 
@@ -441,41 +443,23 @@
         // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
 
             private initializeBuiltins(): void {
-                // Functions
-                this.createBuiltinSymbol(SymbolKind.Function, '@print', {
-                    type: AST.TypeNode.asFunction({start: 0, end: 0}, [
-                            AST.TypeNode.asU8Array({start: 0, end: 0})
-                    ], AST.TypeNode.asVoid({start: 0, end: 0})),
-                    callable: true
-                });
-                this.createBuiltinSymbol(SymbolKind.Function, '@i', {
-                    type: AST.TypeNode.asFunction({start: 0, end: 0}, [
-                            AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)
-                    ], AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)),
-                    callable: true,
-                    metadata: {
-                        isLoopIndexFunction: true,
-                        hasOptionalParameter: true,
-                        defaultParameterValue: 0
-                    }
-                });
-
                 // Types
-                this.createBuiltinSymbol(SymbolKind.Definition, 'slice', {
-                    type: AST.TypeNode.asU8Array({start: 0, end: 0})
-                });
-                this.createBuiltinSymbol(SymbolKind.Definition, 'char', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u8', 8)
-                });
-                this.createBuiltinSymbol(SymbolKind.Definition, 'cpoint', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'u21', 21)
-                });
-                this.createBuiltinSymbol(SymbolKind.Definition, 'usize', {
-                    type: AST.TypeNode.asUnsigned({start: 0, end: 0}, 'usize', 64)
-                });
-                this.createBuiltinSymbol(SymbolKind.Definition, 'isize', {
-                    type: AST.TypeNode.asSigned({start: 0, end: 0}, 'isize', 64)
-                });
+                for (const T of this.builtin.types) {
+                    this.createBuiltinSymbol(SymbolKind.Type, T.name, {
+                        type: T.type,
+                        callable: T.callable,
+                        metadata: T.metadata
+                    });
+                }
+
+                // Functions
+                for(const F of this.builtin.functions) {
+                    this.createBuiltinSymbol(SymbolKind.Function, F.name, {
+                        type: F.type,
+                        callable: F.callable,
+                        metadata: F.metadata
+                    });
+                }
             }
 
             private createBuiltinSymbol(
@@ -506,6 +490,9 @@
 
                 this.globalScope.symbols.set(name, symbol);
                 this.symbolTable.set(symbol.id, symbol);
+
+                // REMOVED: The check should not be here during symbol creation
+                // It should only happen once after ALL symbols are added
 
                 return symbol;
             }

@@ -923,7 +923,7 @@
 
             // Switch with default case
             {
-                input       : 'fn f(x: i32) { match (x) { 1 => { let y = 1; } default => { let z = 0; } } }',
+                input       : 'fn f(x: i32) { match (x) { 1 => { let y = 1; } else => { let z = 0; } } }',
                 success     : true,
                 diagnostics : [],
             },
@@ -2115,7 +2115,7 @@
                         fn classify() -> i32 {
                             match (self.x) {
                                 0 => { return 0; }
-                                default => { return 1; }
+                                else => { return 1; }
                             }
                         }
                     }
@@ -2310,7 +2310,7 @@
         Dummy: [
             {
                 name: 'Dummy',
-                input: `let x = 1;`,
+                input: `let x : slice = "Hello World";`,
                 success: true,
                 diagnostics: [],
             }

@@ -65,9 +65,9 @@
             }
 
             inferExpressionTypeWithContext(expr: AST.ExprNode, expectedType?: AST.TypeNode): AST.TypeNode | null {
-                if (expectedType && expr.is('Primary')) {
+                if (expectedType && expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary && primary.is('Object')) {
+                    if (primary && primary.is('object')) {
                         const obj = primary.getObject()!;
 
                         if (!obj.ident) {
@@ -88,17 +88,17 @@
                 this.config.services.contextTracker.pushContextSpan(expr.span);
                 try {
                     switch (expr.kind) {
-                        case 'Primary':
+                        case 'primary':
                             return this.inferPrimaryType(expr.getPrimary()!);
-                        case 'Binary':
+                        case 'binary':
                             return this.inferBinaryType(expr.getBinary()!);
-                        case 'Prefix':
+                        case 'prefix':
                             return this.inferPrefixType(expr.getPrefix()!);
-                        case 'Postfix':
+                        case 'postfix':
                             return this.inferPostfixType(expr.getPostfix()!);
-                        case 'As':
+                        case 'as':
                             return this.inferAsType(expr.getAs()!);
-                        case 'Typeof': {
+                        case 'typeof': {
                             const typeofNode = expr.getTypeof()!;
                             const innerType = this.inferExpressionType(typeofNode.expr);
 
@@ -116,7 +116,7 @@
                             return AST.TypeNode.asPrimitive(expr.span, 'type');
                         }
 
-                        case 'Sizeof': {
+                        case 'sizeof': {
                             const sizeofNode = expr.getSizeof()!;
                             const targetType = this.inferExpressionType(sizeofNode.expr);
 
@@ -144,17 +144,17 @@
                             // Return as compile-time integer
                             return AST.TypeNode.asComptimeInt(expr.span, size.toString());
                         }
-                        case 'Orelse':
+                        case 'orelse':
                             return this.inferOrelseType(expr.getOrelse()!);
-                        case 'Range':
+                        case 'range':
                             return this.inferRangeType(expr.getRange()!);
-                        case 'Try':
+                        case 'try':
                             return this.inferTryType(expr.getTry()!);
-                        case 'Catch':
+                        case 'catch':
                             return this.inferCatchType(expr.getCatch()!);
-                        case 'If':
+                        case 'if':
                             return this.inferIfType(expr.getIf()!);
-                        case 'Match':
+                        case 'match':
                             return this.inferSwitchType(expr.getMatch()!);
                         default:
                             return null;
@@ -171,20 +171,20 @@
 
             inferPrimaryType(primary: AST.PrimaryNode): AST.TypeNode | null {
                 switch (primary.kind) {
-                    case 'Literal':
+                    case 'literal':
                         return this.inferLiteralType(primary.getLiteral()!);
-                    case 'Ident':
+                    case 'ident':
                         return this.inferIdentifierType(primary.getIdent()!);
-                    case 'Paren':
+                    case 'paren':
                         const paren = primary.getParen()!;
                         return paren.source ? this.inferExpressionType(paren.source) : null;
-                    case 'Tuple':
+                    case 'tuple':
                         return this.inferTupleType(primary.getTuple()!);
-                    case 'Object':
+                    case 'object':
                         return this.inferObjectType(primary.getObject()!);
-                    case 'Type':
+                    case 'type':
                         return primary.getType();
-                    case 'Unreachable':
+                    case 'unreachable':
                         return AST.TypeNode.asNoreturn(primary.span);
                     default:
                         return null;
@@ -524,7 +524,7 @@
                 if (!binary.left || !binary.right) return null;
 
                 // Handle Assignment FIRST, before inferring operand types
-                if (binary.kind === 'Assignment') {
+                if (binary.kind === 'assignment') {
                     this.typeValidator.validateAssignment(binary);
 
                     // Assignment expression evaluates to the right-hand side value
@@ -547,7 +547,7 @@
                 }
 
                 // slice/u8Array
-                if(binary.kind === 'Additive' && binary.operator === '+') {
+                if(binary.kind === 'additive' && binary.operator === '+') {
                     // Resolve both types to their base forms (slice -> []u8)
                     const resolvedLeft = this.resolveIdentifierType(leftType);
                     const resolvedRight = this.resolveIdentifierType(rightType);
@@ -560,8 +560,8 @@
                         const rightMutability = this.getExpressionMutability(binary.right);
 
                         // Ignore literals - they're compatible with everything
-                        const leftEffective = leftMutability === 'Literal' ? null : leftMutability;
-                        const rightEffective = rightMutability === 'Literal' ? null : rightMutability;
+                        const leftEffective = leftMutability === 'literal' ? null : leftMutability;
+                        const rightEffective = rightMutability === 'literal' ? null : rightMutability;
 
                         // If both are non-literals, they must match
                         if (leftEffective !== null && rightEffective !== null) {
@@ -592,9 +592,9 @@
                 }
 
                 switch (binary.kind) {
-                    case 'Additive':
-                    case 'Multiplicative':
-                    case 'Power':
+                    case 'additive':
+                    case 'multiplicative':
+                    case 'power':
                         // Validate operands are numeric
                         if (!this.isNumericType(leftType) || !this.isNumericType(rightType)) {
                             this.reportError(
@@ -606,10 +606,10 @@
                         }
                         return this.promoteNumericTypes(leftType, rightType, binary.span);
 
-                    case 'Shift':
-                    case 'BitwiseAnd':
-                    case 'BitwiseXor':
-                    case 'BitwiseOr':
+                    case 'shift':
+                    case 'bitwiseAnd':
+                    case 'bitwiseXor':
+                    case 'bitwiseOr':
                         // Validate operands are integers
                         if (!this.isIntegerType(leftType) || !this.isIntegerType(rightType)) {
                             this.reportError(
@@ -621,8 +621,8 @@
                         }
                         return this.promoteNumericTypes(leftType, rightType, binary.span);
 
-                    case 'Equality':
-                    case 'Relational':
+                    case 'equality':
+                    case 'relational':
                         // NEW: Validate null comparison with non-optional types
                         // Allow: optional types, null itself, and POINTERS to be compared with null
                         if (leftType.isNull() && !rightType.isOptional() && !rightType.isNull() && !rightType.isPointer()) {
@@ -640,8 +640,8 @@
                         }
                         return AST.TypeNode.asBool(binary.span);
 
-                    case 'LogicalAnd':
-                    case 'LogicalOr':
+                    case 'logicalAnd':
+                    case 'logicalOr':
                         return AST.TypeNode.asBool(binary.span);
 
                     default:
@@ -659,20 +659,20 @@
                 if (!exprType) return null;
 
                 switch (prefix.kind) {
-                    case 'UnaryPlus':
-                    case 'UnaryMinus':
+                    case 'unaryPlus':
+                    case 'unaryMinus':
                         if (!this.isNumericType(exprType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
-                                `Unary '${prefix.kind === 'UnaryMinus' ? '-' : '+'}' requires a numeric operand, got '${this.getTypeDisplayName(exprType)}'`,
+                                `Unary '${prefix.kind === 'unaryMinus' ? '-' : '+'}' requires a numeric operand, got '${this.getTypeDisplayName(exprType)}'`,
                                 prefix.expr.span
                             );
                             return null;
                         }
-                        return this.computeUnaryResultType(exprType, prefix.kind === 'UnaryMinus', prefix.span);
+                        return this.computeUnaryResultType(exprType, prefix.kind === 'unaryMinus', prefix.span);
 
-                    case 'Increment':
-                    case 'Decrement':
+                    case 'increment':
+                    case 'decrement':
                         if (!this.isNumericType(exprType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -683,10 +683,10 @@
                         }
                         return exprType;
 
-                    case 'LogicalNot':
+                    case 'logicalNot':
                         return AST.TypeNode.asBool(prefix.span);
 
-                    case 'BitwiseNot':
+                    case 'bitwiseNot':
                         if (!this.isIntegerType(exprType)) {
                             this.reportError(
                                 DiagCode.TYPE_MISMATCH,
@@ -697,7 +697,7 @@
                         }
                         return exprType;
 
-                    case 'Reference':
+                    case 'reference':
                         // Check if expression is an lvalue before taking reference
                         if (!this.isLValueExpression(prefix.expr)) {
                             this.reportError(
@@ -712,9 +712,9 @@
                         let resolvedType = exprType;
 
                         // Extract the symbol being referenced
-                        if (prefix.expr.is('Primary')) {
+                        if (prefix.expr.is('primary')) {
                             const primary = prefix.expr.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const ident = primary.getIdent();
                                 if (ident) {
                                     const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -745,17 +745,17 @@
 
             inferPostfixType(postfix: AST.PostfixNode): AST.TypeNode | null {
                 switch (postfix.kind) {
-                    case 'Call':
+                    case 'call':
                         return this.inferCallType(postfix.getCall()!);
 
-                    case 'ArrayAccess':
+                    case 'arrayAccess':
                         return this.inferArrayAccessType(postfix.getArrayAccess()!);
 
-                    case 'MemberAccess':
+                    case 'memberAccess':
                         return this.inferMemberAccessType(postfix.getMemberAccess()!);
 
-                    case 'Increment':
-                    case 'Decrement':
+                    case 'increment':
+                    case 'decrement':
                         const exprType = this.inferExpressionType(postfix.getAsExprNode()!);
                         if (exprType && !this.isNumericType(exprType)) {
                             this.reportError(
@@ -767,7 +767,7 @@
                         }
                         return exprType;
 
-                    case 'Dereference':
+                    case 'dereference':
                         const ptrType = this.inferExpressionType(postfix.getAsExprNode()!);
 
                         if (!ptrType) {
@@ -807,9 +807,9 @@
                 }
 
                 // Check if this is an enum variant constructor BEFORE checking methods
-                if (call.base.is('Postfix')) {
+                if (call.base.is('postfix')) {
                     const postfix = call.base.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const access = postfix.getMemberAccess()!;
                         const baseType = this.inferExpressionType(access.base);
 
@@ -878,7 +878,7 @@
                 const resolvedType = this.resolveIdentifierType(baseType);
 
                 // Handle range indexing
-                if (access.index.kind === 'Range') {
+                if (access.index.kind === 'range') {
                     // Return same type as base ([]u8 for slice)
                     return resolvedType;
                 }
@@ -945,9 +945,9 @@
 
 
                 // Check wildcard imports FIRST, before inferring base type
-                if (access.base.is('Primary')) {
+                if (access.base.is('primary')) {
                     const primary = access.base.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent()!;
 
                         if (ident?.name === 'self') {
@@ -1067,9 +1067,9 @@
                 }
 
                 // Handle dereference in base expression
-                if (access.base.is('Postfix')) {
+                if (access.base.is('postfix')) {
                     const postfix = access.base.getPostfix();
-                    if (postfix?.kind === 'Dereference') {
+                    if (postfix?.kind === 'dereference') {
                         if (baseType.isIdent()) {
                             const ident = baseType.getIdent()!;
                             const typeSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -1577,13 +1577,13 @@
             }
 
             isTypeExpression(expr: AST.ExprNode): boolean {
-                if (expr.kind === 'Primary') {
+                if (expr.kind === 'primary') {
                     const primary = expr.getPrimary();
                     if (!primary) return false;
 
                     // Check for Object FIRST before Type
                     // Constructors are Objects with an ident: Point { x: 0 }
-                    if (primary.kind === 'Object') {
+                    if (primary.kind === 'object') {
                         const obj = primary.getObject();
                         // If it has an ident, it's a constructor, NOT a type expression
                         if (obj && obj.ident) {
@@ -1594,12 +1594,12 @@
                     }
 
                     // Direct type expression: return i32, return struct{}, etc.
-                    if (primary.kind === 'Type') {
+                    if (primary.kind === 'type') {
                         return true;
                     }
 
                     // Check if it's an identifier that refers to a type definition
-                    if (primary.kind === 'Ident') {
+                    if (primary.kind === 'ident') {
                         const ident = primary.getIdent();
                         if (!ident) return false;
 
@@ -1622,10 +1622,10 @@
             }
 
             isPointerDereference(expr: AST.ExprNode): boolean {
-                if (!expr.is('Postfix')) return false;
+                if (!expr.is('postfix')) return false;
 
                 const postfix = expr.getPostfix();
-                return postfix?.kind === 'Dereference';
+                return postfix?.kind === 'dereference';
             }
 
             isSameType(type1: AST.TypeNode, type2: AST.TypeNode): boolean {
@@ -1720,9 +1720,9 @@
             }
 
             isConstructorExpression(expr: AST.ExprNode): boolean {
-                if (!expr.is('Primary')) return false;
+                if (!expr.is('primary')) return false;
                 const primary = expr.getPrimary();
-                if (!primary?.is('Object')) return false;
+                if (!primary?.is('object')) return false;
                 const obj = primary.getObject();
                 // Constructor has a type name: Point { x: 0, y: 0 }
                 return obj?.ident !== null && obj?.ident !== undefined;
@@ -1730,19 +1730,19 @@
 
             isLValueExpression(expr: AST.ExprNode): boolean {
                 switch (expr.kind) {
-                    case 'Primary': {
+                    case 'primary': {
                         const primary = expr.getPrimary()!;
 
                         switch (primary.kind) {
-                            case 'Ident':
+                            case 'ident':
                                 // Variables are lvalues
                                 return true;
 
-                            case 'Literal':
+                            case 'literal':
                                 // Literals are NOT lvalues
                                 return false;
 
-                            case 'Paren': {
+                            case 'paren': {
                                 // Check the inner expression
                                 const paren = primary.getParen()!;
                                 return paren.source ? this.isLValueExpression(paren.source) : false;
@@ -1754,28 +1754,28 @@
                         }
                     }
 
-                    case 'Postfix': {
+                    case 'postfix': {
                         const postfix = expr.getPostfix()!;
 
                         switch (postfix.kind) {
-                            case 'Dereference':
+                            case 'dereference':
                                 // ptr.* is an lvalue (points to memory)
                                 return true;
 
-                            case 'ArrayAccess':
+                            case 'arrayAccess':
                                 // arr[i] is an lvalue (array element has memory)
                                 return true;
 
-                            case 'MemberAccess':
+                            case 'memberAccess':
                                 // obj.field is an lvalue (field has memory)
                                 return true;
 
-                            case 'Call':
+                            case 'call':
                                 // Function calls are NOT lvalues (return temporary values)
                                 return false;
 
-                            case 'Increment':
-                            case 'Decrement':
+                            case 'increment':
+                            case 'decrement':
                                 // Post-increment/decrement return the OLD value (temporary)
                                 return false;
 
@@ -1784,16 +1784,16 @@
                         }
                     }
 
-                    case 'Prefix': {
+                    case 'prefix': {
                         const prefix = expr.getPrefix()!;
 
                         switch (prefix.kind) {
-                            case 'Reference':
+                            case 'reference':
                                 // &ptr is an lvalue
                                 return true;
 
-                            case 'Increment':
-                            case 'Decrement':
+                            case 'increment':
+                            case 'decrement':
                                 // Pre-increment/decrement modify and return the lvalue
                                 return this.isLValueExpression(prefix.expr);
 
@@ -1803,16 +1803,16 @@
                         }
                     }
 
-                    case 'Binary':
-                    case 'As':
-                    case 'Orelse':
-                    case 'Range':
-                    case 'Try':
-                    case 'Catch':
-                    case 'If':
-                    case 'Match':
-                    case 'Typeof':
-                    case 'Sizeof':
+                    case 'binary':
+                    case 'as':
+                    case 'orelse':
+                    case 'range':
+                    case 'try':
+                    case 'catch':
+                    case 'if':
+                    case 'match':
+                    case 'typeof':
+                    case 'sizeof':
                         // All of these return temporary values, not lvalues
                         return false;
 
@@ -1822,18 +1822,18 @@
             }
 
             isCharacterLiteral(expr: AST.ExprNode): boolean {
-                if (!expr.is('Primary')) return false;
+                if (!expr.is('primary')) return false;
                 const primary = expr.getPrimary();
-                if (!primary?.is('Literal')) return false;
+                if (!primary?.is('literal')) return false;
                 const literal = primary.getLiteral();
                 return literal?.kind === 'Character';
             }
 
             isBoolLiteral(expr: AST.ExprNode | undefined, value: boolean): boolean {
-                if (!expr || !expr.is('Primary')) return false;
+                if (!expr || !expr.is('primary')) return false;
 
                 const primary = expr.getPrimary();
-                if (!primary?.is('Literal')) return false;
+                if (!primary?.is('literal')) return false;
 
                 const literal = primary.getLiteral();
                 return literal?.kind === 'Bool' && literal.value === value;
@@ -1841,15 +1841,15 @@
 
             isErrorExpression(expr: AST.ExprNode): boolean {
                 // Check for member access (ErrorSet.Member)
-                if (expr.is('Postfix')) {
+                if (expr.is('postfix')) {
                     const postfix = expr.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const memberAccess = postfix.getMemberAccess()!;
 
                         // Check if base is an identifier that refers to an error set
-                        if (memberAccess.base.is('Primary')) {
+                        if (memberAccess.base.is('primary')) {
                             const primary = memberAccess.base.getPrimary();
-                            if (primary?.is('Ident')) {
+                            if (primary?.is('ident')) {
                                 const ident = primary.getIdent()!;
                                 const baseSymbol = this.config.services.scopeManager.lookupSymbol(ident.name);
 
@@ -1864,9 +1864,9 @@
                 }
 
                 // Check for direct identifier (might be error variable)
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent()!;
                         const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
 
@@ -2558,11 +2558,11 @@
                 return null;
             }
 
-            getExpressionMutability(expr: AST.ExprNode): 'Mutable' | 'Immutable' | 'Literal' | 'Unset' {
+            getExpressionMutability(expr: AST.ExprNode): 'Mutable' | 'Immutable' | 'literal' | 'Unset' {
                 // For identifiers, look up the symbol
-                if (expr.is('Primary')) {
+                if (expr.is('primary')) {
                     const primary = expr.getPrimary();
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent();
                         if (ident) {
                             const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
@@ -2580,24 +2580,24 @@
                     }
 
                     // String literals - special case (compatible with both)
-                    if (primary?.is('Literal')) {
+                    if (primary?.is('literal')) {
                         const literal = primary.getLiteral();
                         if (literal?.kind === 'String') {
-                            return 'Literal';  // Changed from 'Immutable'
+                            return 'literal';  // Changed from 'Immutable'
                         }
                     }
                 }
 
                 // For binary expressions (chained concatenation)
-                if (expr.is('Binary')) {
+                if (expr.is('binary')) {
                     const binary = expr.getBinary()!;
-                    if (binary.kind === 'Additive' && binary.operator === '+') {
+                    if (binary.kind === 'additive' && binary.operator === '+') {
                         const leftMut = this.getExpressionMutability(binary.left);
                         const rightMut = this.getExpressionMutability(binary.right);
 
                         // Ignore literals - they're compatible with everything
-                        if (leftMut === 'Literal') return rightMut;
-                        if (rightMut === 'Literal') return leftMut;
+                        if (leftMut === 'literal') return rightMut;
+                        if (rightMut === 'literal') return leftMut;
 
                         // If mixing mutable and immutable variables, that's an error
                         if ((leftMut === 'Mutable') !== (rightMut === 'Mutable')) {
@@ -2610,9 +2610,9 @@
                 }
 
                 // For member access (obj.field), check the field's mutability
-                if (expr.is('Postfix')) {
+                if (expr.is('postfix')) {
                     const postfix = expr.getPostfix();
-                    if (postfix?.kind === 'MemberAccess') {
+                    if (postfix?.kind === 'memberAccess') {
                         const access = postfix.getMemberAccess()!;
                         const memberName = this.extractMemberName(access.target);
 
@@ -2729,41 +2729,41 @@
 
             extractMemberName(memberExpr: AST.ExprNode): string | null {
                 switch (memberExpr.kind) {
-                    case 'Primary': {
+                    case 'primary': {
                         const src = memberExpr.getPrimary()!;
-                        if (src.kind === 'Ident') {
+                        if (src.kind === 'ident') {
                             return src.getIdent()!.name;
                         }
                         return null;
                     }
 
-                    case 'Prefix': {
+                    case 'prefix': {
                         const src = memberExpr.getPrefix()!;
                         return this.extractMemberName(src.expr);
                     }
 
-                    case 'Postfix': {
+                    case 'postfix': {
                         const src = memberExpr.getPostfix()!;
 
                         switch (src.kind) {
-                            case 'MemberAccess': {
+                            case 'memberAccess': {
                                 const access = src.getMemberAccess()!;
                                 return this.extractMemberName(access.target);
                             }
 
-                            case 'Call': {
+                            case 'call': {
                                 const call = src.getCall()!;
                                 return this.extractMemberName(call.base);
                             }
 
-                            case 'ArrayAccess': {
+                            case 'arrayAccess': {
                                 const index = src.getArrayAccess()!;
                                 return this.extractMemberName(index.base);
                             }
 
-                            case 'Increment':
-                            case 'Decrement':
-                            case 'Dereference': {
+                            case 'increment':
+                            case 'decrement':
+                            case 'dereference': {
                                 return this.extractMemberName(src.getAsExprNode()!);
                             }
 
@@ -2772,16 +2772,16 @@
                         }
                     }
 
-                    case 'Binary':
-                    case 'As':
-                    case 'Orelse':
-                    case 'Range':
-                    case 'Try':
-                    case 'Catch':
-                    case 'If':
-                    case 'Match':
-                    case 'Typeof':
-                    case 'Sizeof':
+                    case 'binary':
+                    case 'as':
+                    case 'orelse':
+                    case 'range':
+                    case 'try':
+                    case 'catch':
+                    case 'if':
+                    case 'match':
+                    case 'typeof':
+                    case 'sizeof':
                         return null;
 
                     default:
@@ -2791,10 +2791,10 @@
             }
 
             isStaticMemberAccess(baseExpr: AST.ExprNode): boolean {
-                if (!baseExpr.is('Primary')) return false;
+                if (!baseExpr.is('primary')) return false;
 
                 const primary = baseExpr.getPrimary();
-                if (!primary?.is('Ident')) return false;
+                if (!primary?.is('ident')) return false;
 
                 const ident = primary.getIdent();
                 if (!ident) return false;
@@ -2806,10 +2806,10 @@
             }
 
             findCallTargetSymbol(baseExpr: AST.ExprNode): Symbol | null {
-                if (baseExpr.is('Primary')) {
+                if (baseExpr.is('primary')) {
                     const primary = baseExpr.getPrimary();
 
-                    if (primary?.is('Ident')) {
+                    if (primary?.is('ident')) {
                         const ident = primary.getIdent();
                         if (ident && !ident.builtin) {
                             return this.config.services.scopeManager.lookupSymbol(ident.name);
