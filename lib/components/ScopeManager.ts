@@ -87,9 +87,7 @@
             params?         : Symbol[];     // Function parameters
             returnType?     : AST.TypeNode; // Function return type
             errorType?      : AST.TypeNode; // Function error type
-            isAsync?        : boolean;      // Async function
             isStatic?       : boolean;      // Static member
-            isAbstract?     : boolean;      // Abstract member
             isBuiltin?      : boolean;      // Built-in symbol
             errorMode?      : 'err-ident' | 'err-group' | 'any-error' | 'self-group';
             selfGroupErrors?: string[];     // Only for self-group mode
@@ -154,8 +152,8 @@
                 this.globalScope = this.createScope(ScopeKind.Global, 'global', null);
                 this.currentScope = this.globalScope.id;
 
-                // Initialize built-in symbols
-                this.initializeBuiltins();
+                // // Initialize built-in symbols
+                // this.initializeBuiltins();
             }
 
             reset(): void {
@@ -175,8 +173,8 @@
                 this.globalScope.symbols.clear();
                 this.globalScope.children = [];
 
-                // Reinitialize built-ins
-                this.initializeBuiltins();
+                // // Reinitialize built-ins
+                // this.initializeBuiltins();
             }
 
             createScope(kind: ScopeKind, name: string, parentId: ScopeId | null): Scope {
@@ -442,60 +440,61 @@
 
         // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
 
-            private initializeBuiltins(): void {
-                // Types
-                for (const T of this.builtin.types) {
-                    this.createBuiltinSymbol(SymbolKind.Type, T.name, {
-                        type: T.type,
-                        callable: T.callable,
-                        metadata: T.metadata
-                    });
-                }
+            // private initializeBuiltins(): void {
+            //     // Types
+            //     for (const T of this.builtin.types) {
+            //         this.createBuiltinSymbol(SymbolKind.Type, T.name, {
+            //             type: T.type,
+            //             callable: T.callable,
+            //             metadata: T.metadata
+            //         });
+            //     }
 
-                // Functions
-                for(const F of this.builtin.functions) {
-                    this.createBuiltinSymbol(SymbolKind.Function, F.name, {
-                        type: F.type,
-                        callable: F.callable,
-                        metadata: F.metadata
-                    });
-                }
-            }
+            //     // Functions
+            //     for(const F of this.builtin.functions) {
+            //         this.createBuiltinSymbol(SymbolKind.Function, F.name, {
+            //             type: F.type,
+            //             callable: F.callable,
+                        
+            //             metadata: F.metadata
+            //         });
+            //     }
+            // }
 
-            private createBuiltinSymbol(
-                kind: SymbolKind,
-                name: string,
-                options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
-            ): Symbol {
-                const symbol: Symbol = {
-                    id: this.symbolIdGenerator.next(),
-                    kind,
-                    name,
-                    contextSpan: { start: 0, end: 0 },
-                    scope: this.globalScope.id,
-                    visibility: { kind: 'Public' },
-                    mutability: { kind: 'Immutable'},
-                    type: options.type,
-                    used: false,
-                    initialized: true,
-                    declared: true,
-                    isTypeChecked: true,
-                    isExported: false,
-                    metadata: {
-                        callable: options.callable || false,
-                        isBuiltin: true,
-                        ...options.metadata
-                    }
-                };
+            // private createBuiltinSymbol(
+            //     kind: SymbolKind,
+            //     name: string,
+            //     options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
+            // ): Symbol {
+            //     const symbol: Symbol = {
+            //         id: this.symbolIdGenerator.next(),
+            //         kind,
+            //         name,
+            //         contextSpan: { start: 0, end: 0 },
+            //         scope: this.globalScope.id,
+            //         visibility: { kind: 'Public' },
+            //         mutability: { kind: 'Immutable'},
+            //         type: options.type,
+            //         used: false,
+            //         initialized: true,
+            //         declared: true,
+            //         isTypeChecked: true,
+            //         isExported: false,
+            //         metadata: {
+            //             callable: options.callable || false,
+            //             isBuiltin: true,
+            //             ...options.metadata
+            //         }
+            //     };
 
-                this.globalScope.symbols.set(name, symbol);
-                this.symbolTable.set(symbol.id, symbol);
+            //     this.globalScope.symbols.set(name, symbol);
+            //     this.symbolTable.set(symbol.id, symbol);
 
-                // REMOVED: The check should not be here during symbol creation
-                // It should only happen once after ALL symbols are added
+            //     // REMOVED: The check should not be here during symbol creation
+            //     // It should only happen once after ALL symbols are added
 
-                return symbol;
-            }
+            //     return symbol;
+            // }
 
         // └──────────────────────────────────────────────────────────────────────┘
 

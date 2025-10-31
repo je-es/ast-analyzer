@@ -29,6 +29,7 @@
             private debugLevel          : DebugKind = 'off';
             private indentLevel         = 0;
             private contextTracker?     : ContextTracker;
+            private lastMessage         : string = '';
 
             constructor(contextTracker?: ContextTracker, debugLevel: DebugKind = 'off') {
                 this.debugLevel         = debugLevel;
@@ -83,9 +84,9 @@
                             const stackLines = err.stack.split('\n');
 
                             // Try to extract file path, line number, and column number
-                            if (stackLines.length > 2) {
-                                const match = stackLines[2].match(/at .* \((.*):(\d+):(\d+)\)/) ||
-                                              stackLines[2].match(/at (.*):(\d+):(\d+)/);
+                            if (stackLines.length > 3) {
+                                const match = stackLines[3].match(/at .* \((.*):(\d+):(\d+)\)/) ||
+                                              stackLines[3].match(/at (.*):(\d+):(\d+)/);
                                 if (match && match[1] && match[2] && match[3]) {
                                     const fullPath = match[1];
                                     short_file_path = fullPath.split('/').slice(-2).join('/'); // last two segments
@@ -112,7 +113,11 @@
                         }
                     }
 
-                    // console.log(`${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`);
+                    const msg_to_log = `${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`;
+                    if(this.lastMessage !== msg_to_log) {
+                        console.log(msg_to_log);
+                        this.lastMessage = msg_to_log;
+                    }
                 }
             }
 

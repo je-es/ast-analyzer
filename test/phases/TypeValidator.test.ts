@@ -976,7 +976,7 @@
                 diagnostics: [{
                     kind: 'error',
                     code: 'UNDEFINED_IDENTIFIER',
-                    msg: "Undefined type 'UndefinedError'",
+                    msg: "error type 'undefinederror' is not defined",
                 }]
             },
         ],

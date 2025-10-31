@@ -1309,11 +1309,12 @@
             isTypeCompatible(target: AST.TypeNode, source: AST.TypeNode, sourceExpr?: AST.ExprNode): boolean {
                 this.typeValidator.stats.compatibilityChecks++;
 
+                // STEP 1: NORMALIZE BOTH TYPES (unwrap parens, etc.)
+                const normalizedTarget = this.normalizeType(target);
+                const normalizedSource = this.normalizeType(source);
+
                 // ⚠️ STRICT MODE: Pointer dereference requires EXACT type match
                 if (sourceExpr && this.isPointerDereference(sourceExpr)) {
-                    const normalizedTarget = this.normalizeType(target);
-                    const normalizedSource = this.normalizeType(source);
-
                     // For pointer dereference, only allow exact type match (no widening)
                     if (!this.isSameType(normalizedTarget, normalizedSource)) {
                         return false;
@@ -1321,9 +1322,6 @@
                     // If types match exactly, continue with normal validation
                 }
 
-                // STEP 1: NORMALIZE BOTH TYPES (unwrap parens, etc.)
-                const normalizedTarget = this.normalizeType(target);
-                const normalizedSource = this.normalizeType(source);
 
                 // STEP 2: RESOLVE IDENTIFIERS EARLY (Point -> struct, slice -> []u8, etc.)
                 const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
@@ -1937,14 +1935,18 @@
                 if (!type.isIdent()) return type;
 
                 const ident = type.getIdent()!;
-                if (ident.builtin) return type;
 
-                const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
-                if (symbol && symbol.type) {
-                    // RECURSIVELY resolve until we hit a non-identifier
-                    return this.resolveIdentifierType(symbol.type);
-                }
+                // STEP 1: Check if this is a builtin FIRST (before looking for symbol)
+                const is_ident_in_builtin =
+                    this.config.builtin.types.map(t => t.stmt.getDef()!.ident.name).includes(ident.name) ||
+                    this.config.builtin.functions.map(f => f.stmt.getFunc()!.ident.name).includes(ident.name);
 
+                // STEP 2: Early return for builtins - they don't need validation
+                const symbol = !is_ident_in_builtin
+                ? this.config.services.scopeManager.lookupSymbol(ident.name)
+                : this.config.services.scopeManager.getGlobalScope().symbols.get(ident.name);
+
+                if (symbol && symbol.type) { return this.resolveIdentifierType(symbol.type); }
                 return type;
             }
 

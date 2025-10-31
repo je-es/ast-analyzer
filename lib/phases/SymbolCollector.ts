@@ -14,6 +14,7 @@
     import { PathUtils }            from '../utils/PathUtils';
     import { PhaseBase }            from '../interfaces/PhaseBase';
     import { AnalysisConfig }       from '../ast-analyzer';
+    import { BuiltinConfig }        from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -72,9 +73,23 @@
                 try {
                     this.log('verbose', 'Starting symbol collection phase...');
                     this.stats.startTime = Date.now();
+                    const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                     if (!this.init()) { return false; }
                     if (!this.buildPathMappings()) { return false; }
+                    if (!this.collectBuiltins(globalScope)) { return false; }
+
+                    // Print Builtins
+                    {
+                        // get all symbols from the global scope
+                        const symbols = this.config.services.scopeManager.getScope(globalScope.id).symbols;
+
+                        // console.log('Builtins:');
+                        // for (const symbol of symbols) {
+                        //     console.log(`  ${JSON.stringify(symbol, null, 2)}`);
+                        // }
+                    }
+
                     if (!this.collectAllModules()) { return false; }
 
                     this.logStatistics();
@@ -148,8 +163,10 @@
 
             private collectAllModules(): boolean {
                 this.log('verbose', 'Collecting symbols from all modules...');
+                // [1] global scope and builtin
                 const globalScope = this.config.services.scopeManager.getCurrentScope();
 
+                // [2] ..
                 for (const [moduleName, module] of this.config.program!.modules) {
                     this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
                     try {
@@ -165,6 +182,49 @@
                 }
 
                 return true;
+            }
+
+            private collectBuiltins(globalScope: Scope): boolean {
+                this.log('verbose', 'Collecting symbols from builtins...');
+
+                // Reset type context for each module
+                this.typeContext = this.initTypeContext();
+
+                try {
+                    for (const i in this.config.builtin.types) {
+                        const stmt = this.config.builtin.types[i].stmt;
+                        this.log('symbols', `Collect def [${stmt.getDef()!.ident.name}] builtin`)
+                        this.collectDefStmt(stmt.getDef()!, globalScope, 'global-scope-module');
+
+                        // set symbol to builtin
+                        const symbol = this.config.services.scopeManager.lookupSymbol(stmt.getDef()!.ident.name);
+                        if (symbol) {
+                            if(!symbol.metadata) symbol.metadata = {};
+                            symbol.metadata!.isBuiltin = true;
+                        }
+                    }
+
+                    for (const i in this.config.builtin.functions) {
+                        const stmt = this.config.builtin.functions[i].stmt;
+                        this.log('symbols', `Collect func [${stmt.getFunc()!.ident.name}] builtin`)
+                        this.collectFuncStmt(stmt.getFunc()!, globalScope, 'global-scope-module');
+
+                        // set symbol to builtin
+                        const symbol = this.config.services.scopeManager.lookupSymbol(stmt.getFunc()!.ident.name);
+                        if (symbol) {
+                            if(!symbol.metadata) symbol.metadata = {};
+                            symbol.metadata!.isBuiltin = true;
+                        }
+                    }
+
+                    return true;
+
+                } catch (error) {
+                    this.log('errors', `Fatal error during symbol collection: ${error}`);
+                    this.reportError( DiagCode.INTERNAL_ERROR, `Fatal error during symbol collection: ${error}` );
+                    console.error(error);
+                    return false;
+                }
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -919,7 +979,8 @@
                             funcSymbol.metadata.params = this.collectParams(funcNode.parameters, funcScope, moduleName);
                         }
 
-                        if (funcNode.body) {
+                        // Collect function body
+                        if (funcNode.body && !funcSymbol.metadata?.isBuiltin) {
                             this.collectStmt(funcNode.body, funcScope, moduleName);
                         }
                     });
@@ -1803,14 +1864,14 @@
                 }
 
                 // Prevent built-in shadowing
-                if (newSymbolName.startsWith('@')) {
-                    this.reportError(
-                        DiagCode.DUPLICATE_SYMBOL,
-                        `Cannot shadow built-in symbol '${newSymbolName}'`,
-                        span
-                    );
-                    return true;
-                }
+                // if (newSymbolName.startsWith('@')) {
+                //     this.reportError(
+                //         DiagCode.DUPLICATE_SYMBOL,
+                //         `Cannot shadow built-in symbol '${newSymbolName}'`,
+                //         span
+                //     );
+                //     return true;
+                // }
 
                 const existingSymbol = outer
                     ? this.config.services.scopeManager.lookupSymbolInParentScopes(newSymbolName, currentScope.id)

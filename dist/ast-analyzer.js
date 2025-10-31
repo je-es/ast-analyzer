@@ -289,9 +289,28 @@ var DiagnosticManager = class {
     const priority = { error: 2, warning: 1, info: 0 };
     return (priority[d1.kind] || 0) > (priority[d2.kind] || 0);
   }
+  // TODO: ignore diags like this (from "global-scope-module")
+  //      {
+  //         "code": "UNUSED_PARAMETER",
+  //         "kind": "warning",
+  //         "msg": "Parameter 'level' is declared but never used",
+  //         "targetSpan": {
+  //             "start": 0,
+  //             "end": 0
+  //         },
+  //         "sourceModuleName": "global-scope-module",
+  //         "sourceModulePath": "./src/main.k",
+  //         "contextSpan": {
+  //             "start": 0,
+  //             "end": 0
+  //         }
+  //      }
   filterDuplicates(diagnostics) {
     const seen = /* @__PURE__ */ new Map();
-    for (const diagnostic of diagnostics) {
+    const filtered = diagnostics.filter(
+      (d) => !(d.sourceModuleName === "global-scope-module")
+    );
+    for (const diagnostic of filtered) {
       let foundDuplicate = false;
       let duplicateKey = null;
       for (const [key, existingDiagnostic] of seen.entries()) {
@@ -874,6 +893,7 @@ var DebugManager = class {
     // ┌──────────────────────────────── INIT ──────────────────────────────┐
     this.debugLevel = "off";
     this.indentLevel = 0;
+    this.lastMessage = "";
     this.debugLevel = debugLevel;
     this.contextTracker = contextTracker;
   }
@@ -914,8 +934,8 @@ var DebugManager = class {
         const err = new Error();
         if (err.stack) {
           const stackLines = err.stack.split("\n");
-          if (stackLines.length > 2) {
-            const match = stackLines[2].match(/at .* \((.*):(\d+):(\d+)\)/) || stackLines[2].match(/at (.*):(\d+):(\d+)/);
+          if (stackLines.length > 3) {
+            const match = stackLines[3].match(/at .* \((.*):(\d+):(\d+)\)/) || stackLines[3].match(/at (.*):(\d+):(\d+)/);
             if (match && match[1] && match[2] && match[3]) {
               const fullPath = match[1];
               short_file_path = fullPath.split("/").slice(-2).join("/");
@@ -938,6 +958,11 @@ var DebugManager = class {
             short_file_path = `./${short_file_path.replace(/\\/g, "/")}`;
           }
         }
+      }
+      const msg_to_log = `${prefix} ${indent}${callerInfo}${message} at ${short_file_path}:${line}:${column}`;
+      if (this.lastMessage !== msg_to_log) {
+        console.log(msg_to_log);
+        this.lastMessage = msg_to_log;
       }
     }
   }
@@ -1030,7 +1055,6 @@ var ScopeManager = class {
     this.namespaceLookup = /* @__PURE__ */ new Map();
     this.globalScope = this.createScope("Global" /* Global */, "global", null);
     this.currentScope = this.globalScope.id;
-    this.initializeBuiltins();
   }
   reset() {
     const globalScopeId = this.globalScope.id;
@@ -1041,7 +1065,6 @@ var ScopeManager = class {
     this.currentScope = globalScopeId;
     this.globalScope.symbols.clear();
     this.globalScope.children = [];
-    this.initializeBuiltins();
   }
   createScope(kind, name, parentId) {
     const scope = {
@@ -1241,46 +1264,55 @@ var ScopeManager = class {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
-  initializeBuiltins() {
-    for (const T of this.builtin.types) {
-      this.createBuiltinSymbol("type" /* Type */, T.name, {
-        type: T.type,
-        callable: T.callable,
-        metadata: T.metadata
-      });
-    }
-    for (const F of this.builtin.functions) {
-      this.createBuiltinSymbol("Function" /* Function */, F.name, {
-        type: F.type,
-        callable: F.callable,
-        metadata: F.metadata
-      });
-    }
-  }
-  createBuiltinSymbol(kind, name, options) {
-    const symbol = {
-      id: this.symbolIdGenerator.next(),
-      kind,
-      name,
-      contextSpan: { start: 0, end: 0 },
-      scope: this.globalScope.id,
-      visibility: { kind: "Public" },
-      mutability: { kind: "Immutable" },
-      type: options.type,
-      used: false,
-      initialized: true,
-      declared: true,
-      isTypeChecked: true,
-      isExported: false,
-      metadata: __spreadValues({
-        callable: options.callable || false,
-        isBuiltin: true
-      }, options.metadata)
-    };
-    this.globalScope.symbols.set(name, symbol);
-    this.symbolTable.set(symbol.id, symbol);
-    return symbol;
-  }
+  // private initializeBuiltins(): void {
+  //     // Types
+  //     for (const T of this.builtin.types) {
+  //         this.createBuiltinSymbol(SymbolKind.Type, T.name, {
+  //             type: T.type,
+  //             callable: T.callable,
+  //             metadata: T.metadata
+  //         });
+  //     }
+  //     // Functions
+  //     for(const F of this.builtin.functions) {
+  //         this.createBuiltinSymbol(SymbolKind.Function, F.name, {
+  //             type: F.type,
+  //             callable: F.callable,
+  //             metadata: F.metadata
+  //         });
+  //     }
+  // }
+  // private createBuiltinSymbol(
+  //     kind: SymbolKind,
+  //     name: string,
+  //     options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
+  // ): Symbol {
+  //     const symbol: Symbol = {
+  //         id: this.symbolIdGenerator.next(),
+  //         kind,
+  //         name,
+  //         contextSpan: { start: 0, end: 0 },
+  //         scope: this.globalScope.id,
+  //         visibility: { kind: 'Public' },
+  //         mutability: { kind: 'Immutable'},
+  //         type: options.type,
+  //         used: false,
+  //         initialized: true,
+  //         declared: true,
+  //         isTypeChecked: true,
+  //         isExported: false,
+  //         metadata: {
+  //             callable: options.callable || false,
+  //             isBuiltin: true,
+  //             ...options.metadata
+  //         }
+  //     };
+  //     this.globalScope.symbols.set(name, symbol);
+  //     this.symbolTable.set(symbol.id, symbol);
+  //     // REMOVED: The check should not be here during symbol creation
+  //     // It should only happen once after ALL symbols are added
+  //     return symbol;
+  // }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── SYMBOL MARKERS ───────────────────────────┐
   markSymbolUsed(symbolId) {
@@ -1827,11 +1859,18 @@ var SymbolCollector = class extends PhaseBase {
     try {
       this.log("verbose", "Starting symbol collection phase...");
       this.stats.startTime = Date.now();
+      const globalScope = this.config.services.scopeManager.getCurrentScope();
       if (!this.init()) {
         return false;
       }
       if (!this.buildPathMappings()) {
         return false;
+      }
+      if (!this.collectBuiltins(globalScope)) {
+        return false;
+      }
+      {
+        const symbols = this.config.services.scopeManager.getScope(globalScope.id).symbols;
       }
       if (!this.collectAllModules()) {
         return false;
@@ -1908,6 +1947,38 @@ var SymbolCollector = class extends PhaseBase {
       }
     }
     return true;
+  }
+  collectBuiltins(globalScope) {
+    this.log("verbose", "Collecting symbols from builtins...");
+    this.typeContext = this.initTypeContext();
+    try {
+      for (const i in this.config.builtin.types) {
+        const stmt = this.config.builtin.types[i].stmt;
+        this.log("symbols", `Collect def [${stmt.getDef().ident.name}] builtin`);
+        this.collectDefStmt(stmt.getDef(), globalScope, "global-scope-module");
+        const symbol = this.config.services.scopeManager.lookupSymbol(stmt.getDef().ident.name);
+        if (symbol) {
+          if (!symbol.metadata) symbol.metadata = {};
+          symbol.metadata.isBuiltin = true;
+        }
+      }
+      for (const i in this.config.builtin.functions) {
+        const stmt = this.config.builtin.functions[i].stmt;
+        this.log("symbols", `Collect func [${stmt.getFunc().ident.name}] builtin`);
+        this.collectFuncStmt(stmt.getFunc(), globalScope, "global-scope-module");
+        const symbol = this.config.services.scopeManager.lookupSymbol(stmt.getFunc().ident.name);
+        if (symbol) {
+          if (!symbol.metadata) symbol.metadata = {};
+          symbol.metadata.isBuiltin = true;
+        }
+      }
+      return true;
+    } catch (error) {
+      this.log("errors", `Fatal error during symbol collection: ${error}`);
+      this.reportError("INTERNAL_ERROR" /* INTERNAL_ERROR */, `Fatal error during symbol collection: ${error}`);
+      console.error(error);
+      return false;
+    }
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌────────────────────────── [2] Module Level ──────────────────────────┐
@@ -2426,6 +2497,7 @@ var SymbolCollector = class extends PhaseBase {
     const isStructMethod = parentScope.kind === "type" /* Type */ && ((_a = parentScope.metadata) == null ? void 0 : _a.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
     this.config.services.scopeManager.withScope(funcScope.id, () => {
       this.config.services.contextTracker.withSavedState(() => {
+        var _a2;
         if (isStructMethod) {
           this.injectSelfParameter(funcScope, parentScope, moduleName);
         }
@@ -2436,7 +2508,7 @@ var SymbolCollector = class extends PhaseBase {
         if (funcSymbol.metadata && funcSymbol.metadata.params) {
           funcSymbol.metadata.params = this.collectParams(funcNode.parameters, funcScope, moduleName);
         }
-        if (funcNode.body) {
+        if (funcNode.body && !((_a2 = funcSymbol.metadata) == null ? void 0 : _a2.isBuiltin)) {
           this.collectStmt(funcNode.body, funcScope, moduleName);
         }
       });
@@ -3145,14 +3217,6 @@ var SymbolCollector = class extends PhaseBase {
         return true;
       }
     }
-    if (newSymbolName.startsWith("@")) {
-      this.reportError(
-        "DUPLICATE_SYMBOL" /* DUPLICATE_SYMBOL */,
-        `Cannot shadow built-in symbol '${newSymbolName}'`,
-        span
-      );
-      return true;
-    }
     const existingSymbol = outer ? this.config.services.scopeManager.lookupSymbolInParentScopes(newSymbolName, currentScope.id) : currentScope.symbols.get(newSymbolName);
     if (existingSymbol) {
       const isInTypeScope = currentScope.kind === "type" /* Type */;
@@ -3425,7 +3489,11 @@ var SymbolResolver = class extends PhaseBase {
     try {
       this.log("verbose", "Starting symbol resolution phase...");
       this.stats.startTime = Date.now();
+      const globalScope = this.config.services.scopeManager.getCurrentScope();
       if (!this.init()) return false;
+      if (!this.resolveBuiltins(globalScope)) {
+        return false;
+      }
       if (!this.resolveAllModules()) return false;
       this.logStatistics();
       return !this.config.services.diagnosticManager.hasErrors();
@@ -3441,6 +3509,26 @@ var SymbolResolver = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌────────────────────────── [1] Program Level ─────────────────────────┐
+  resolveBuiltins(globalScope) {
+    this.log("symbols", `Resolving from builtins'`);
+    try {
+      this.config.services.scopeManager.setCurrentScope(globalScope.id);
+      this.config.services.contextTracker.setScope(globalScope.id);
+      ;
+      this.resetDeclaredFlags(globalScope);
+      for (const i in this.config.builtin.types) {
+        this.resolveDefStmt(this.config.builtin.types[i].stmt.getDef());
+      }
+      for (const i in this.config.builtin.functions) {
+        this.resolveFuncStmt(this.config.builtin.functions[i].stmt.getFunc());
+      }
+      return true;
+    } catch (error) {
+      this.log("errors", `Failed to resolve from builtins: ${error}`);
+      this.reportError("INTERNAL_ERROR" /* INTERNAL_ERROR */, `Failed to resolve from builtins: ${error}`);
+      return false;
+    }
+  }
   resolveAllModules() {
     this.log("verbose", "Resolving symbols from all modules...");
     const globalScope = this.config.services.scopeManager.getCurrentScope();
@@ -4007,8 +4095,10 @@ var SymbolResolver = class extends PhaseBase {
     this.currentStructScope = isStaticMethod ? parentScope : null;
     const isStructMethod = (parentScope == null ? void 0 : parentScope.kind) === "type" /* Type */ && ((_b = parentScope.metadata) == null ? void 0 : _b.typeKind) === "Struct" && !(funcNode.visibility.kind === "Static");
     try {
+      let is_return_type_resolved = void 0;
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(funcScope.id, () => {
+          var _a2;
           if (isStructMethod) {
             this.resolveSelfParameter(funcScope, parentScope);
           }
@@ -4060,7 +4150,7 @@ var SymbolResolver = class extends PhaseBase {
               mutability: { kind: "Immutable" },
               isExported: false
             };
-            this.resolveType(funcNode.returnType, tempReturnSymbol);
+            is_return_type_resolved = this.resolveType(funcNode.returnType, tempReturnSymbol);
             returnType = funcNode.returnType;
           }
           if (funcNode.errorType) {
@@ -4079,7 +4169,10 @@ var SymbolResolver = class extends PhaseBase {
               mutability: { kind: "Immutable" },
               isExported: false
             };
-            if (!this.resolveType(funcNode.errorType, tempErrorSymbol, funcNode.span)) {
+            if (is_return_type_resolved === void 0) {
+              is_return_type_resolved = this.resolveType(funcNode.errorType, tempErrorSymbol, funcNode.span);
+            }
+            if (!is_return_type_resolved) {
               funcSymbol.isTypeChecked = true;
               return;
             }
@@ -4121,7 +4214,7 @@ var SymbolResolver = class extends PhaseBase {
             returnType || AST2.TypeNode.asVoid(funcNode.span),
             funcNode.errorType
           );
-          if (funcNode.body) {
+          if (funcNode.body && !((_a2 = funcSymbol.metadata) == null ? void 0 : _a2.isBuiltin)) {
             this.config.services.contextTracker.enterExpression(
               "FunctionBody" /* FunctionBody */,
               funcNode.body.span
@@ -4909,12 +5002,13 @@ var SymbolResolver = class extends PhaseBase {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── [6] Type Level ───────────────────────────┐
   resolveType(typeNode, symbol, contextSpan) {
-    var _a, _b;
+    var _a, _b, _c;
     this.log("symbols", `Resolving type for symbol '${symbol.name}', typeNode: ${typeNode.toString()}`);
     switch (typeNode.kind) {
       case "ident": {
         const identNode = typeNode.getIdent();
-        if (!identNode.builtin) {
+        const is_ident_in_builtin = this.config.builtin.types.map((t) => t.stmt.getDef().ident.name).includes(identNode.name) || this.config.builtin.functions.map((f) => f.stmt.getFunc().ident.name).includes(identNode.name);
+        if (!identNode.builtin && !((_a = symbol.metadata) == null ? void 0 : _a.isBuiltin) && !is_ident_in_builtin) {
           const typeSymbol = this.config.services.scopeManager.lookupSymbol(identNode.name);
           if (!typeSymbol) {
             this.reportError(
@@ -4933,6 +5027,21 @@ var SymbolResolver = class extends PhaseBase {
             return false;
           }
           typeSymbol.used = true;
+        } else {
+          const globalScope = this.config.services.scopeManager.getAllScopes().find((s) => s.kind === "Global" /* Global */);
+          if (!globalScope) {
+            throw new Error("Global scope not found");
+          }
+          const builtinSymbol = globalScope.symbols.get(identNode.name);
+          if (!builtinSymbol) {
+            this.reportError(
+              "UNDEFINED_BUILTIN" /* UNDEFINED_BUILTIN */,
+              `Undefined builtin type '${identNode.name}'`,
+              identNode.span
+            );
+            return false;
+          }
+          builtinSymbol.used = true;
         }
         symbol.type = typeNode;
         return true;
@@ -4985,7 +5094,7 @@ var SymbolResolver = class extends PhaseBase {
       case "struct": {
         const struct = typeNode.getStruct();
         let typeScope = null;
-        if (((_a = struct.metadata) == null ? void 0 : _a.scopeId) !== void 0) {
+        if (((_b = struct.metadata) == null ? void 0 : _b.scopeId) !== void 0) {
           try {
             typeScope = this.config.services.scopeManager.getScope(struct.metadata.scopeId);
           } catch (e) {
@@ -5047,7 +5156,7 @@ var SymbolResolver = class extends PhaseBase {
       case "enum": {
         const enumType = typeNode.getEnum();
         let typeScope = null;
-        if (((_b = enumType.metadata) == null ? void 0 : _b.scopeId) !== void 0) {
+        if (((_c = enumType.metadata) == null ? void 0 : _c.scopeId) !== void 0) {
           try {
             typeScope = this.config.services.scopeManager.getScope(enumType.metadata.scopeId);
           } catch (e) {
@@ -7646,15 +7755,13 @@ var TypeInference = class {
   // ┌──────────────────────────── TYPE COMPATIBILITY ──────────────────────┐
   isTypeCompatible(target, source, sourceExpr) {
     this.typeValidator.stats.compatibilityChecks++;
+    const normalizedTarget = this.normalizeType(target);
+    const normalizedSource = this.normalizeType(source);
     if (sourceExpr && this.isPointerDereference(sourceExpr)) {
-      const normalizedTarget2 = this.normalizeType(target);
-      const normalizedSource2 = this.normalizeType(source);
-      if (!this.isSameType(normalizedTarget2, normalizedSource2)) {
+      if (!this.isSameType(normalizedTarget, normalizedSource)) {
         return false;
       }
     }
-    const normalizedTarget = this.normalizeType(target);
-    const normalizedSource = this.normalizeType(source);
     const resolvedTarget = this.resolveIdentifierType(normalizedTarget);
     const resolvedSource = this.resolveIdentifierType(normalizedSource);
     if (this.isAnyType(resolvedTarget)) return true;
@@ -8075,8 +8182,8 @@ var TypeInference = class {
   resolveIdentifierType(type) {
     if (!type.isIdent()) return type;
     const ident = type.getIdent();
-    if (ident.builtin) return type;
-    const symbol = this.config.services.scopeManager.lookupSymbol(ident.name);
+    const is_ident_in_builtin = this.config.builtin.types.map((t) => t.stmt.getDef().ident.name).includes(ident.name) || this.config.builtin.functions.map((f) => f.stmt.getFunc().ident.name).includes(ident.name);
+    const symbol = !is_ident_in_builtin ? this.config.services.scopeManager.lookupSymbol(ident.name) : this.config.services.scopeManager.getGlobalScope().symbols.get(ident.name);
     if (symbol && symbol.type) {
       return this.resolveIdentifierType(symbol.type);
     }
@@ -8774,7 +8881,11 @@ var TypeValidator = class extends PhaseBase {
     try {
       this.log("verbose", "Starting symbol validation phase...");
       this.stats.startTime = Date.now();
+      const globalScope = this.config.services.scopeManager.getCurrentScope();
       if (!this.init()) return false;
+      if (!this.validateBuiltins(globalScope)) {
+        return false;
+      }
       if (!this.validateAllModules()) return false;
       this.logStatistics();
       return !this.config.services.diagnosticManager.hasErrors();
@@ -8792,6 +8903,23 @@ var TypeValidator = class extends PhaseBase {
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌────────────────────────── [1] Program Level ─────────────────────────┐
+  validateBuiltins(globalScope) {
+    this.log("verbose", "Validating types from builtin...");
+    try {
+      this.config.services.scopeManager.setCurrentScope(globalScope.id);
+      this.config.services.contextTracker.setScope(globalScope.id);
+      for (const i in this.config.builtin.types) {
+        this.validateDefStmt(this.config.builtin.types[i].stmt.getDef());
+      }
+      for (const i in this.config.builtin.functions) {
+        this.validateFuncStmt(this.config.builtin.functions[i].stmt.getFunc());
+      }
+      return true;
+    } catch (error) {
+      this.reportError("INTERNAL_ERROR" /* INTERNAL_ERROR */, `Failed to validate builtins : ${error}`);
+      return false;
+    }
+  }
   validateAllModules() {
     this.log("verbose", "Validating types from all modules...");
     const globalScope = this.config.services.scopeManager.getCurrentScope();
@@ -9181,7 +9309,17 @@ var TypeValidator = class extends PhaseBase {
   validateFuncStmt(funcNode) {
     var _a, _b;
     this.logSymbolValidation("Type checking function", funcNode.ident.name);
-    const funcSymbol = this.config.services.scopeManager.getSymbolInCurrentScope(funcNode.ident.name);
+    const identNode = funcNode.ident;
+    const is_ident_in_builtin = this.config.builtin.types.map((t) => t.stmt.getDef().ident.name).includes(identNode.name) || this.config.builtin.functions.map((f) => f.stmt.getFunc().ident.name).includes(identNode.name);
+    if (is_ident_in_builtin) {
+      this.log("symbols", `Skipping validation for builtin function '${funcNode.ident.name}'`);
+      const builtinSymbol = this.config.services.scopeManager.getGlobalScope().symbols.get(funcNode.ident.name);
+      if (builtinSymbol) {
+        builtinSymbol.isTypeChecked = true;
+      }
+      return;
+    }
+    let funcSymbol = this.config.services.scopeManager.getSymbolInCurrentScope(funcNode.ident.name);
     if (!funcSymbol) {
       this.reportError(
         "CANNOT_INFER_TYPE" /* CANNOT_INFER_TYPE */,
@@ -9219,7 +9357,7 @@ var TypeValidator = class extends PhaseBase {
     try {
       this.config.services.contextTracker.withSavedState(() => {
         this.config.services.scopeManager.withScope(funcScope.id, () => {
-          var _a2, _b2, _c, _d, _e;
+          var _a2, _b2, _c, _d, _e, _f;
           if (isInstanceMethod) {
             this.resolveSelfParameter(funcScope, parentScope);
           }
@@ -9257,12 +9395,12 @@ var TypeValidator = class extends PhaseBase {
             }
           }
           funcSymbol.metadata.defaultParamIndices = defaultParamIndices;
-          if (funcNode.body) {
+          if (funcNode.body && !((_e = funcSymbol.metadata) == null ? void 0 : _e.isBuiltin)) {
             this.validateStmt(funcNode.body);
             const expectedReturnType = funcNode.returnType || this.currentFunctionReturnType;
             if (expectedReturnType && !expectedReturnType.isVoid()) {
               const hasErrorType = funcNode.errorType || this.currentFunctionErrorType;
-              if (!this.hasReturnStatement && !((_e = funcNode.returnType) == null ? void 0 : _e.isNoreturn())) {
+              if (!this.hasReturnStatement && !((_f = funcNode.returnType) == null ? void 0 : _f.isNoreturn())) {
                 if (!hasErrorType || !this.hasThrowStatement) {
                   this.reportError(
                     "MISSING_RETURN_STATEMENT" /* MISSING_RETURN_STATEMENT */,

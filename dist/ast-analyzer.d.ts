@@ -14,6 +14,7 @@ declare class DebugManager {
     private debugLevel;
     private indentLevel;
     private contextTracker?;
+    private lastMessage;
     constructor(contextTracker?: ContextTracker, debugLevel?: DebugKind);
     reset(): void;
     log(level: DebugKind, message: string): void;
@@ -82,9 +83,7 @@ interface Symbol {
         params?: Symbol[];
         returnType?: AST.TypeNode;
         errorType?: AST.TypeNode;
-        isAsync?: boolean;
         isStatic?: boolean;
-        isAbstract?: boolean;
         isBuiltin?: boolean;
         errorMode?: 'err-ident' | 'err-group' | 'any-error' | 'self-group';
         selfGroupErrors?: string[];
@@ -157,8 +156,6 @@ declare class ScopeManager {
         includeParents?: boolean;
         namespace?: string;
     }): Symbol | null;
-    private initializeBuiltins;
-    private createBuiltinSymbol;
     markSymbolUsed(symbolId: SymbolId): void;
     markSymbolInitialized(symbolId: SymbolId): void;
     markSymbolTypeChecked(symbolId: SymbolId): void;
@@ -548,6 +545,7 @@ declare class SymbolCollector extends PhaseBase {
     reset(): void;
     private buildPathMappings;
     private collectAllModules;
+    private collectBuiltins;
     private collectModule;
     private createModuleScope;
     private collectStmt;
@@ -641,6 +639,7 @@ declare class SymbolResolver extends PhaseBase {
     constructor(config: AnalysisConfig);
     handle(): boolean;
     reset(): void;
+    private resolveBuiltins;
     private resolveAllModules;
     private resolveModule;
     private resetDeclaredFlags;
@@ -894,6 +893,7 @@ declare class TypeValidator extends PhaseBase {
     constructor(config: AnalysisConfig);
     handle(): boolean;
     reset(): void;
+    validateBuiltins(globalScope: Scope): boolean;
     validateAllModules(): boolean;
     validateModule(moduleName: string, module: AST.Module, parentScope: Scope): boolean;
     enterModuleContext(moduleName: string, module: AST.Module): void;

@@ -1572,7 +1572,7 @@
         ...NestedStructTests,
         ...MultiModuleTests,
         ...CallValidationTests,
-        ...Dummy,
+        // ...Dummy,
     }, AnalysisPhase.Resolution);
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝

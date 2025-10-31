@@ -438,7 +438,7 @@
                 success: false,
                 diagnostics: [{
                     kind: 'error',
-                    msg: "Undefined type 'UndefinedError'",
+                    msg: "error type 'undefinederror' is not defined",
                     code: "UNDEFINED_IDENTIFIER"
                 }]
             },
@@ -511,7 +511,7 @@
                 success: false,
                 diagnostics: [{
                     kind: 'error',
-                    msg: "Undefined type 'UndefinedErrorGroup'",
+                    msg: "error type 'undefinederrorgroup' is not defined",
                     code: "UNDEFINED_IDENTIFIER"
                 }]
             },

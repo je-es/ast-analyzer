@@ -15,6 +15,7 @@
                                         from '../../components/ScopeManager';
     import { ExpressionEvaluator }      from './ExpressionEvaluator';
     import { TypeInference }            from './TypeInference';
+import { BuiltinConfig } from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -83,8 +84,10 @@
                 try {
                     this.log('verbose', 'Starting symbol validation phase...');
                     this.stats.startTime = Date.now();
+                    const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                     if (!this.init()) return false;
+                    if (!this.validateBuiltins(globalScope)) { return false; }
                     if (!this.validateAllModules()) return false;
 
                     this.logStatistics();
@@ -108,6 +111,28 @@
 
 
         // ┌────────────────────────── [1] Program Level ─────────────────────────┐
+
+            validateBuiltins(globalScope: Scope): boolean {
+                this.log('verbose', 'Validating types from builtin...');
+
+               try {
+                    this.config.services.scopeManager.setCurrentScope(globalScope.id);
+                    this.config.services.contextTracker.setScope(globalScope.id);
+
+                    for (const i in this.config.builtin.types) {
+                        this.validateDefStmt(this.config.builtin.types[i].stmt.getDef()!);
+                    }
+
+                    for (const i in this.config.builtin.functions) {
+                        this.validateFuncStmt(this.config.builtin.functions[i].stmt.getFunc()!);
+                    }
+
+                    return true;
+                } catch (error) {
+                    this.reportError(DiagCode.INTERNAL_ERROR, `Failed to validate builtins : ${error}`);
+                    return false;
+                }
+            }
 
             validateAllModules(): boolean {
                 this.log('verbose', 'Validating types from all modules...');
@@ -630,8 +655,29 @@
 
             validateFuncStmt(funcNode: AST.FuncStmtNode): void {
                 this.logSymbolValidation('Type checking function', funcNode.ident.name);
+                const identNode = funcNode.ident;
 
-                const funcSymbol = this.config.services.scopeManager.getSymbolInCurrentScope(funcNode.ident.name);
+                // STEP 1: Check if this is a builtin FIRST (before looking for symbol)
+                const is_ident_in_builtin =
+                    this.config.builtin.types.map(t => t.stmt.getDef()!.ident.name).includes(identNode.name) ||
+                    this.config.builtin.functions.map(f => f.stmt.getFunc()!.ident.name).includes(identNode.name);
+
+                // STEP 2: Early return for builtins - they don't need validation
+                if (is_ident_in_builtin) {
+                    this.log('symbols', `Skipping validation for builtin function '${funcNode.ident.name}'`);
+
+                    // Still mark the symbol as type-checked if it exists
+                    const builtinSymbol = this.config.services.scopeManager.getGlobalScope().symbols.get(funcNode.ident.name);
+                    if (builtinSymbol) {
+                        builtinSymbol.isTypeChecked = true;
+                    }
+
+                    return; // Early exit - no scope validation needed for builtins
+                }
+
+                // STEP 3: Now handle normal (non-builtin) functions
+                let funcSymbol = this.config.services.scopeManager.getSymbolInCurrentScope(funcNode.ident.name);
+
                 if (!funcSymbol) {
                     this.reportError(
                         DiagCode.CANNOT_INFER_TYPE,
@@ -738,7 +784,7 @@
                             funcSymbol.metadata!.defaultParamIndices = defaultParamIndices;
 
                             // Validate body
-                            if (funcNode.body) {
+                            if (funcNode.body && !funcSymbol.metadata?.isBuiltin) {
                                 this.validateStmt(funcNode.body);
 
                                 const expectedReturnType = funcNode.returnType || this.currentFunctionReturnType;

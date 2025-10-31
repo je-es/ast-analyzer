@@ -15,6 +15,7 @@
     import { PathUtils }            from '../utils/PathUtils';
     import { PhaseBase }            from '../interfaces/PhaseBase';
     import { AnalysisConfig }       from '../ast-analyzer';
+import { BuiltinConfig } from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -78,8 +79,10 @@
                 try {
                     this.log('verbose', 'Starting symbol resolution phase...');
                     this.stats.startTime = Date.now();
+                    const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                     if (!this.init()) return false;
+                    if (!this.resolveBuiltins(globalScope)) { return false; }
                     if (!this.resolveAllModules()) return false;
 
                     this.logStatistics();
@@ -102,8 +105,34 @@
 
         // ┌────────────────────────── [1] Program Level ─────────────────────────┐
 
+            private resolveBuiltins(globalScope: Scope): boolean {
+                this.log('symbols', `Resolving from builtins'`);
+
+                try {
+                    this.config.services.scopeManager.setCurrentScope(globalScope.id);
+                    this.config.services.contextTracker.setScope(globalScope.id);;
+
+                    this.resetDeclaredFlags(globalScope);
+
+                    for (const i in this.config.builtin.types) {
+                        this.resolveDefStmt(this.config.builtin.types[i].stmt.getDef()!);
+                    }
+
+                    for (const i in this.config.builtin.functions) {
+                        this.resolveFuncStmt(this.config.builtin.functions[i].stmt.getFunc()!);
+                    }
+
+                    return true;
+                } catch (error) {
+                    this.log('errors', `Failed to resolve from builtins: ${error}`);
+                    this.reportError(DiagCode.INTERNAL_ERROR, `Failed to resolve from builtins: ${error}`);
+                    return false;
+                }
+            }
+
             private resolveAllModules(): boolean {
                 this.log('verbose', 'Resolving symbols from all modules...');
+                // [1] global scope and builtin
                 const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                 for (const [moduleName, module] of this.config.program!.modules) {
@@ -853,6 +882,8 @@
                                     !(funcNode.visibility.kind === 'Static');
 
                 try {
+                    let is_return_type_resolved : boolean | undefined = undefined;
+
                     this.config.services.contextTracker.withSavedState(() => {
                         this.config.services.scopeManager.withScope(funcScope.id, () => {
                             // Resolve self parameter if struct method
@@ -918,7 +949,7 @@
                                     mutability: { kind: 'Immutable' },
                                     isExported: false
                                 };
-                                this.resolveType(funcNode.returnType, tempReturnSymbol);
+                                is_return_type_resolved = this.resolveType(funcNode.returnType, tempReturnSymbol);
                                 returnType = funcNode.returnType;
                             }
 
@@ -940,7 +971,11 @@
                                     isExported: false
                                 };
 
-                                if (!this.resolveType(funcNode.errorType, tempErrorSymbol, funcNode.span)) {
+                                if(is_return_type_resolved === undefined) {
+                                    is_return_type_resolved = this.resolveType(funcNode.errorType, tempErrorSymbol, funcNode.span);
+                                }
+
+                                if (!is_return_type_resolved) {
                                     funcSymbol.isTypeChecked = true;
                                     return;
                                 }
@@ -996,7 +1031,7 @@
                             );
 
                             // Resolve function body
-                            if (funcNode.body) {
+                            if (funcNode.body && !funcSymbol.metadata?.isBuiltin) {
                                 this.config.services.contextTracker.enterExpression(
                                     ExpressionContext.FunctionBody,
                                     funcNode.body.span
@@ -1998,7 +2033,11 @@
                     case 'ident': {
                         const identNode = typeNode.getIdent()!;
 
-                        if (!identNode.builtin) {
+                        const is_ident_in_builtin =
+                            this.config.builtin.types.map(t => t.stmt.getDef()!.ident.name).includes(identNode.name) ||
+                            this.config.builtin.functions.map(f => f.stmt.getFunc()!.ident.name).includes(identNode.name);
+
+                        if ((!identNode.builtin && !symbol.metadata?.isBuiltin) && !is_ident_in_builtin) {
                             const typeSymbol = this.config.services.scopeManager.lookupSymbol(identNode.name);
 
                             if (!typeSymbol) {
@@ -2020,6 +2059,24 @@
                             }
 
                             typeSymbol.used = true;
+                        } else {
+                            const globalScope = this.config.services.scopeManager.getAllScopes().find(s => s.kind === ScopeKind.Global);
+                            if (!globalScope) {
+                                throw new Error('Global scope not found');
+                            }
+
+                            const builtinSymbol = globalScope.symbols.get(identNode.name);
+
+                            if (!builtinSymbol) {
+                                this.reportError(
+                                    DiagCode.UNDEFINED_BUILTIN,
+                                    `Undefined builtin type '${identNode.name}'`,
+                                    identNode.span
+                                );
+                                return false;
+                            }
+
+                            builtinSymbol.used = true;
                         }
 
                         symbol.type = typeNode;
