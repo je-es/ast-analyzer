@@ -12,10 +12,9 @@
     import { DiagCode }             from '../components/DiagnosticManager';
     import { Scope, Symbol, SymbolKind, ScopeKind }
                                     from '../components/ScopeManager';
-    import { PathUtils }            from '../utils/PathUtils';
+    import * as Path                from '../utils/Path';
     import { PhaseBase }            from '../interfaces/PhaseBase';
     import { AnalysisConfig }       from '../ast-analyzer';
-import { BuiltinConfig } from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -356,12 +355,12 @@ import { BuiltinConfig } from '@je-es/syntax';
                         return;
                     }
 
-                    if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
+                    if (!Path.validatePath(this.config.program, useNode.path, currentModulePath)) {
                         return;
                     }
 
-                    const resolvedPath = PathUtils.resolveModulePath(this.config.program, useNode.path, currentModulePath);
-                    const targetModuleName = PathUtils.findModuleNameByPath(this.config.program, resolvedPath);
+                    const resolvedPath = Path.resolveModulePath(this.config.program, useNode.path, currentModulePath);
+                    const targetModuleName = Path.findModuleNameByPath(this.config.program, resolvedPath);
 
                     if (!targetModuleName) {
                         this.reportError(DiagCode.MODULE_NOT_FOUND, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
@@ -392,7 +391,7 @@ import { BuiltinConfig } from '@je-es/syntax';
                     return;
                 }
 
-                if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
+                if (!Path.validatePath(this.config.program, useNode.path, currentModulePath)) {
                     // Only report if this is a new error case
                     if (!existingSymbol.importSource) {
                         this.reportError(DiagCode.MODULE_NOT_FOUND, `Module not found: ${useNode.path}`, useNode.span);
@@ -400,8 +399,8 @@ import { BuiltinConfig } from '@je-es/syntax';
                     return;
                 }
 
-                const resolvedPath = PathUtils.resolveModulePath(this.config.program, useNode.path, currentModulePath);
-                const targetModuleName = PathUtils.findModuleNameByPath(this.config.program, resolvedPath);
+                const resolvedPath = Path.resolveModulePath(this.config.program, useNode.path, currentModulePath);
+                const targetModuleName = Path.findModuleNameByPath(this.config.program, resolvedPath);
 
                 if (!targetModuleName) {
                     this.reportError(DiagCode.MODULE_NOT_FOUND, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
@@ -1846,7 +1845,6 @@ import { BuiltinConfig } from '@je-es/syntax';
                 );
             }
 
-            // Add this helper method if it doesn't exist:
             private resolveIdentifierType(type: AST.TypeNode): AST.TypeNode {
                 if (!type.isIdent()) return type;
 

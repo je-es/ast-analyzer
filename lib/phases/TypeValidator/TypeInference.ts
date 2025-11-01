@@ -18,13 +18,6 @@
 
 
 
-// ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
-
-
-// ╚══════════════════════════════════════════════════════════════════════════════════════╝
-
-
-
 // ╔════════════════════════════════════════ CORE ════════════════════════════════════════╗
 
     export class TypeInference {
@@ -2082,7 +2075,6 @@
                         }
                     }
 
-                    // ADD THIS: Report error if variant not found
                     this.reportError(
                         DiagCode.SYMBOL_NOT_FOUND,
                         `Enum variant '${memberName}' not found`,
@@ -2100,7 +2092,6 @@
                         }
                     }
 
-                    // ADD THIS: Report error if error member not found
                     this.reportError(
                         DiagCode.ERROR_MEMBER_NOT_FOUND,
                         `Error member '${memberName}' not found in error set`,
@@ -2331,12 +2322,12 @@
                         return false;
                     }
 
-                    // CRITICAL FIX: Both fields must have types
+                    // Both fields must have types
                     if (!targetField.type || !sourceField.type) {
                         return false;
                     }
 
-                    // CRITICAL FIX: Use isTypeCompatible, not isSameType
+                    // Use isTypeCompatible, not isSameType
                     // This allows i32 to match comptime_int, etc.
                     if (!this.isTypeCompatible(targetField.type, sourceField.type)) {
                         return false;

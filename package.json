@@ -1,7 +1,7 @@
 {
 	"name": "@je-es/ast-analyzer",
-	"version": "0.0.7",
-	"description": "A library for analyzing and validating Abstract Syntax Trees.",
+	"version": "0.0.8",
+	"description": "Multi-phase semantic analyzer with type validation, error handling, and LSP support for compilers.",
 	"keywords": [
 		"je-es",
 		"ast",

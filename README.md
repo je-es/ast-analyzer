@@ -9,10 +9,11 @@
 
 <div align="center">
     <p align="center" style="font-style:italic; color:gray;">
-        A library for analyzing and validating Abstract Syntax Trees.
+        Multi-phase semantic analyzer with advanced type system and error handling.<br>
+        Symbol resolution, type validation, LSP integration, and comptime evaluation for modern compiler frontends.<br>
         <br>
     </p>
-    <img src="https://img.shields.io/badge/Version-0.0.7-black"/>
+    <img src="https://img.shields.io/badge/Version-0.0.8-black"/>
     <a href="https://github.com/je-es"><img src="https://img.shields.io/badge/Part_of-@je--es-black"/></a>
     <a href="https://github.com/kemet-lang"><img src="https://img.shields.io/badge/Built_for-@kemet--lang-black"/></a>
 </div>

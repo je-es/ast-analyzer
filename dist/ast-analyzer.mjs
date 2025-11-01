@@ -245,22 +245,6 @@ var DiagnosticManager = class {
     const priority = { error: 2, warning: 1, info: 0 };
     return (priority[d1.kind] || 0) > (priority[d2.kind] || 0);
   }
-  // TODO: ignore diags like this (from "global-scope-module")
-  //      {
-  //         "code": "UNUSED_PARAMETER",
-  //         "kind": "warning",
-  //         "msg": "Parameter 'level' is declared but never used",
-  //         "targetSpan": {
-  //             "start": 0,
-  //             "end": 0
-  //         },
-  //         "sourceModuleName": "global-scope-module",
-  //         "sourceModulePath": "./src/main.k",
-  //         "contextSpan": {
-  //             "start": 0,
-  //             "end": 0
-  //         }
-  //      }
   filterDuplicates(diagnostics) {
     const seen = /* @__PURE__ */ new Map();
     const filtered = diagnostics.filter(
@@ -996,9 +980,8 @@ var SymbolKind = /* @__PURE__ */ ((SymbolKind2) => {
   return SymbolKind2;
 })(SymbolKind || {});
 var ScopeManager = class {
-  constructor(debugManager, builtin) {
+  constructor(debugManager) {
     this.debugManager = debugManager;
-    this.builtin = builtin;
     this.idGenerator = new IdGenerator();
     this.symbolIdGenerator = new IdGenerator();
     this.init();
@@ -1218,57 +1201,6 @@ var ScopeManager = class {
     } while (scope && ((_a = opts.includeParents) != null ? _a : true));
     return null;
   }
-  // └──────────────────────────────────────────────────────────────────────┘
-  // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
-  // private initializeBuiltins(): void {
-  //     // Types
-  //     for (const T of this.builtin.types) {
-  //         this.createBuiltinSymbol(SymbolKind.Type, T.name, {
-  //             type: T.type,
-  //             callable: T.callable,
-  //             metadata: T.metadata
-  //         });
-  //     }
-  //     // Functions
-  //     for(const F of this.builtin.functions) {
-  //         this.createBuiltinSymbol(SymbolKind.Function, F.name, {
-  //             type: F.type,
-  //             callable: F.callable,
-  //             metadata: F.metadata
-  //         });
-  //     }
-  // }
-  // private createBuiltinSymbol(
-  //     kind: SymbolKind,
-  //     name: string,
-  //     options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
-  // ): Symbol {
-  //     const symbol: Symbol = {
-  //         id: this.symbolIdGenerator.next(),
-  //         kind,
-  //         name,
-  //         contextSpan: { start: 0, end: 0 },
-  //         scope: this.globalScope.id,
-  //         visibility: { kind: 'Public' },
-  //         mutability: { kind: 'Immutable'},
-  //         type: options.type,
-  //         used: false,
-  //         initialized: true,
-  //         declared: true,
-  //         isTypeChecked: true,
-  //         isExported: false,
-  //         metadata: {
-  //             callable: options.callable || false,
-  //             isBuiltin: true,
-  //             ...options.metadata
-  //         }
-  //     };
-  //     this.globalScope.symbols.set(name, symbol);
-  //     this.symbolTable.set(symbol.id, symbol);
-  //     // REMOVED: The check should not be here during symbol creation
-  //     // It should only happen once after ALL symbols are added
-  //     return symbol;
-  // }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌─────────────────────────── SYMBOL MARKERS ───────────────────────────┐
   markSymbolUsed(symbolId) {
@@ -1632,81 +1564,61 @@ ScopeManager.SYMBOL_PROXIMITY_THRESHOLD = 1e3;
 // lib/phases/SymbolCollector.ts
 import * as AST from "@je-es/ast";
 
-// lib/utils/PathUtils.ts
+// lib/utils/Path.ts
 import * as path from "path";
-var PathUtils = class {
-  /**
-   * Resolves a module import path against the program's root path
-   */
-  static resolveModulePath(program, importPath, currentModulePath) {
-    var _a;
-    const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
-    if (importPath.startsWith(".") && currentModulePath) {
-      const currentDir = path.dirname(currentModulePath);
-      const resolved = path.resolve(currentDir, importPath);
-      return path.relative(programRoot, resolved);
-    }
-    if (path.isAbsolute(importPath)) {
-      return path.relative(programRoot, importPath);
-    }
-    return path.normalize(importPath);
+function resolveModulePath(program, importPath, currentModulePath) {
+  var _a;
+  const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
+  if (importPath.startsWith(".") && currentModulePath) {
+    const currentDir = path.dirname(currentModulePath);
+    const resolved = path.resolve(currentDir, importPath);
+    return path.relative(programRoot, resolved);
   }
-  /**
-   * Finds a module by its resolved path
-   */
-  static findModuleByPath(program, targetPath) {
-    var _a, _b;
-    const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
-    const normalizedTarget = path.normalize(targetPath);
-    for (const [_, module] of program.modules) {
-      const modulePath = (_b = module.metadata) == null ? void 0 : _b.path;
-      if (!modulePath) continue;
-      const relativeModulePath = path.relative(programRoot, modulePath);
-      const normalizedModulePath = path.normalize(modulePath);
-      const normalizedRelativePath = path.normalize(relativeModulePath);
-      if (normalizedModulePath === normalizedTarget || normalizedRelativePath === normalizedTarget || modulePath === targetPath || relativeModulePath === targetPath) {
-        return module;
-      }
-    }
-    return void 0;
+  if (path.isAbsolute(importPath)) {
+    return path.relative(programRoot, importPath);
   }
-  /**
-   * Validates if a path exists in the program structure
-   */
-  static validatePath(program, importPath, currentModulePath) {
-    try {
-      const resolvedPath = this.resolveModulePath(program, importPath, currentModulePath);
-      return this.findModuleByPath(program, resolvedPath) !== void 0;
-    } catch (e) {
-      return false;
+  return path.normalize(importPath);
+}
+function findModuleByPath(program, targetPath) {
+  var _a, _b;
+  const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
+  const normalizedTarget = path.normalize(targetPath);
+  for (const [_, module] of program.modules) {
+    const modulePath = (_b = module.metadata) == null ? void 0 : _b.path;
+    if (!modulePath) continue;
+    const relativeModulePath = path.relative(programRoot, modulePath);
+    const normalizedModulePath = path.normalize(modulePath);
+    const normalizedRelativePath = path.normalize(relativeModulePath);
+    if (normalizedModulePath === normalizedTarget || normalizedRelativePath === normalizedTarget || modulePath === targetPath || relativeModulePath === targetPath) {
+      return module;
     }
   }
-  /**
-   * Gets the relative path between two modules
-   */
-  static getRelativePath(fromPath, toPath) {
-    const relativePath = path.relative(path.dirname(fromPath), toPath);
-    return relativePath.startsWith(".") ? relativePath : "./" + relativePath;
+  return void 0;
+}
+function validatePath(program, importPath, currentModulePath) {
+  try {
+    const resolvedPath = resolveModulePath(program, importPath, currentModulePath);
+    return findModuleByPath(program, resolvedPath) !== void 0;
+  } catch (e) {
+    return false;
   }
-  /**
-   * Finds the module name by its path
-   */
-  static findModuleNameByPath(program, targetPath) {
-    var _a;
-    const module = this.findModuleByPath(program, targetPath);
-    if (!module) return void 0;
-    const metadataName = (_a = module.metadata) == null ? void 0 : _a.name;
-    if (metadataName) return metadataName;
-    const baseName = path.basename(targetPath, path.extname(targetPath));
-    return baseName === "index" ? path.basename(path.dirname(targetPath)) : baseName;
-  }
-  /**
-   * Normalizes a path for consistent comparison
-   */
-  static normalizePath(filePath) {
-    return path.normalize(filePath).replace(/\\/g, "/");
-  }
-};
+}
+function getRelativePath(fromPath, toPath) {
+  const relativePath = path.relative(path.dirname(fromPath), toPath);
+  return relativePath.startsWith(".") ? relativePath : "./" + relativePath;
+}
+function findModuleNameByPath(program, targetPath) {
+  var _a;
+  const module = findModuleByPath(program, targetPath);
+  if (!module) return void 0;
+  const metadataName = (_a = module.metadata) == null ? void 0 : _a.name;
+  if (metadataName) return metadataName;
+  const baseName = path.basename(targetPath, path.extname(targetPath));
+  return baseName === "index" ? path.basename(path.dirname(targetPath)) : baseName;
+}
+function normalizePath(filePath) {
+  return path.normalize(filePath).replace(/\\/g, "/");
+}
 
 // lib/interfaces/PhaseBase.ts
 var PhaseBase = class {
@@ -1864,8 +1776,8 @@ var SymbolCollector = class extends PhaseBase {
         continue;
       }
       try {
-        const relativePath = PathUtils.getRelativePath(rootPath, modulePath);
-        const normalizedPath = PathUtils.normalizePath(relativePath);
+        const relativePath = getRelativePath(rootPath, modulePath);
+        const normalizedPath = normalizePath(relativePath);
         if (this.pathContext.pathMappings.has(normalizedPath)) {
           const existing = this.pathContext.pathMappings.get(normalizedPath);
           if (existing !== moduleName) {
@@ -2123,13 +2035,13 @@ var SymbolCollector = class extends PhaseBase {
     }
     const currentModule = this.config.program.modules.get(moduleName);
     const currentModulePath = (_a = currentModule == null ? void 0 : currentModule.metadata) == null ? void 0 : _a.path;
-    if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
+    if (!validatePath(this.config.program, useNode.path, currentModulePath)) {
       this.reportError("MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */, `Module not found in path '${useNode.path}'`, useNode.pathSpan);
       this.stats.importResolutionFailures++;
       return;
     }
-    const resolvedPath = PathUtils.resolveModulePath(this.config.program, useNode.path, currentModulePath);
-    const targetModuleName = PathUtils.findModuleNameByPath(this.config.program, resolvedPath);
+    const resolvedPath = resolveModulePath(this.config.program, useNode.path, currentModulePath);
+    const targetModuleName = findModuleNameByPath(this.config.program, resolvedPath);
     if (!targetModuleName) {
       this.reportError("MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
       this.stats.importResolutionFailures++;
@@ -3667,11 +3579,11 @@ var SymbolResolver = class extends PhaseBase {
       if (!existingSymbol2 || existingSymbol2.kind !== "use" /* Use */) {
         return;
       }
-      if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
+      if (!validatePath(this.config.program, useNode.path, currentModulePath)) {
         return;
       }
-      const resolvedPath2 = PathUtils.resolveModulePath(this.config.program, useNode.path, currentModulePath);
-      const targetModuleName2 = PathUtils.findModuleNameByPath(this.config.program, resolvedPath2);
+      const resolvedPath2 = resolveModulePath(this.config.program, useNode.path, currentModulePath);
+      const targetModuleName2 = findModuleNameByPath(this.config.program, resolvedPath2);
       if (!targetModuleName2) {
         this.reportError("MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
         return;
@@ -3691,14 +3603,14 @@ var SymbolResolver = class extends PhaseBase {
     if (!existingSymbol || existingSymbol.kind !== "use" /* Use */) {
       return;
     }
-    if (!PathUtils.validatePath(this.config.program, useNode.path, currentModulePath)) {
+    if (!validatePath(this.config.program, useNode.path, currentModulePath)) {
       if (!existingSymbol.importSource) {
         this.reportError("MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */, `Module not found: ${useNode.path}`, useNode.span);
       }
       return;
     }
-    const resolvedPath = PathUtils.resolveModulePath(this.config.program, useNode.path, currentModulePath);
-    const targetModuleName = PathUtils.findModuleNameByPath(this.config.program, resolvedPath);
+    const resolvedPath = resolveModulePath(this.config.program, useNode.path, currentModulePath);
+    const targetModuleName = findModuleNameByPath(this.config.program, resolvedPath);
     if (!targetModuleName) {
       this.reportError("MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
       return;
@@ -4824,7 +4736,6 @@ var SymbolResolver = class extends PhaseBase {
       span
     );
   }
-  // Add this helper method if it doesn't exist:
   resolveIdentifierType(type) {
     if (!type.isIdent()) return type;
     const ident = type.getIdent();
@@ -11582,7 +11493,7 @@ var SemanticValidator = class extends PhaseBase {
 };
 
 // lib/ast-analyzer.ts
-var Analyzer = class _Analyzer {
+var _Analyzer = class _Analyzer {
   constructor(config = {}) {
     this.phaseTimings = /* @__PURE__ */ new Map();
     this.getDiagMgr = () => this.config.services.diagnosticManager;
@@ -11593,21 +11504,8 @@ var Analyzer = class _Analyzer {
     this.semanticValidator = new SemanticValidator(this.config);
     this.log("verbose", `\u{1F680} Analyzer initialized with config: ${JSON.stringify(this.config)}`);
   }
-  /** Factory method to create analyzer instance */
-  static create(config) {
-    return new _Analyzer(config);
-  }
-  log(kind = "verbose", message) {
-    this.config.services.debugManager.log(kind, message);
-  }
-  // └────────────────────────────────────────────────────────────────────┘
-  // ┌──────────────────────── MAIN ANALYSIS INTERFACE ───────────────────┐
-  /**
-   * Analyze a program through all configured phases
-   * @param new_program The AST program to analyze
-   * @param config Optional runtime configuration overrides
-   * @returns Analysis result with diagnostics and metadata
-   */
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── MAIN ────────────────────────────────┐
   analyze(new_program, config) {
     const startTime = Date.now();
     this.log("verbose", "\u{1F50D} Starting multi-phase analysis...");
@@ -11661,40 +11559,20 @@ var Analyzer = class _Analyzer {
       return this.createFatalErrorResult(error instanceof Error ? error.message : String(error));
     }
   }
-  createServices(config) {
-    var _a, _b;
-    const debugManager = new DebugManager(void 0, (_a = config.debug) != null ? _a : "off");
-    const contextTracker = new ContextTracker(debugManager);
-    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config.strictMode) != null ? _b : false);
-    if (config.builtin === void 0) throw new Error("Builtin symbols must be provided");
-    const scopeManager = new ScopeManager(debugManager, config.builtin);
-    return { debugManager, contextTracker, diagnosticManager, scopeManager };
+  reset() {
+    this.log("verbose", "\u{1F504} Resetting analyzer state...");
+    this.phaseTimings.clear();
+    this.config.services.contextTracker.reset();
+    this.config.services.diagnosticManager.reset();
+    this.config.services.debugManager.reset();
+    this.config.services.scopeManager.reset();
+    this.symbolCollector.reset();
+    this.symbolResolver.reset();
+    this.typeValidator.reset();
+    this.semanticValidator.reset();
   }
-  createConfig(config) {
-    var _a, _b, _c, _d, _e, _f;
-    if (!config.program) {
-      throw new Error("Program must be provided");
-    }
-    const config_without_services = {
-      debug: (_a = config.debug) != null ? _a : "off",
-      stopAtPhase: (_b = config.stopAtPhase) != null ? _b : "SemanticValidation" /* SemanticValidation */,
-      strictMode: (_c = config.strictMode) != null ? _c : false,
-      maxErrors: (_d = config.maxErrors) != null ? _d : 100,
-      program: (_e = config.program) != null ? _e : null,
-      builtin: (_f = config.builtin) != null ? _f : { types: [], functions: [] }
-    };
-    return {
-      debug: config_without_services.debug,
-      stopAtPhase: config_without_services.stopAtPhase,
-      strictMode: config_without_services.strictMode,
-      maxErrors: config_without_services.maxErrors,
-      program: config_without_services.program,
-      builtin: config_without_services.builtin,
-      services: this.createServices(config_without_services)
-    };
-  }
-  // └────────────────────────────────────────────────────────────────────┘
-  // ┌────────────────────────── PHASE EXECUTION ─────────────────────────┐
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── ---- ────────────────────────────────┐
   executePhase1() {
     this.log("symbols", "\u{1F4C2} Phase 1: Symbol Collection");
     return this.symbolCollector.handle();
@@ -11742,8 +11620,8 @@ var Analyzer = class _Analyzer {
       this.config.services.debugManager.decreaseIndent();
     }
   }
-  // └────────────────────────────────────────────────────────────────────┘
-  // ┌─────────────────────── VALIDATION AND UTILITIES ───────────────────┐
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── ---- ────────────────────────────────┐
   validateProgramStructure(program) {
     var _a;
     if (!program) {
@@ -11781,20 +11659,40 @@ var Analyzer = class _Analyzer {
     const targetIndex = phaseOrder.indexOf(targetPhase);
     return currentIndex > targetIndex;
   }
-  reset() {
-    this.log("verbose", "\u{1F504} Resetting analyzer state...");
-    this.phaseTimings.clear();
-    this.config.services.contextTracker.reset();
-    this.config.services.diagnosticManager.reset();
-    this.config.services.debugManager.reset();
-    this.config.services.scopeManager.reset();
-    this.symbolCollector.reset();
-    this.symbolResolver.reset();
-    this.typeValidator.reset();
-    this.semanticValidator.reset();
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── ---- ────────────────────────────────┐
+  createServices(config) {
+    var _a, _b;
+    const debugManager = new DebugManager(void 0, (_a = config.debug) != null ? _a : "off");
+    const contextTracker = new ContextTracker(debugManager);
+    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config.strictMode) != null ? _b : false);
+    if (config.builtin === void 0) throw new Error("Builtin symbols must be provided");
+    const scopeManager = new ScopeManager(debugManager);
+    return { debugManager, contextTracker, diagnosticManager, scopeManager };
   }
-  // └────────────────────────────────────────────────────────────────────┘
-  // ┌───────────────────────── RESULT GENERATION ────────────────────────┐
+  createConfig(config) {
+    var _a, _b, _c, _d, _e, _f;
+    if (!config.program) {
+      throw new Error("Program must be provided");
+    }
+    const config_without_services = {
+      debug: (_a = config.debug) != null ? _a : "off",
+      stopAtPhase: (_b = config.stopAtPhase) != null ? _b : "SemanticValidation" /* SemanticValidation */,
+      strictMode: (_c = config.strictMode) != null ? _c : false,
+      maxErrors: (_d = config.maxErrors) != null ? _d : 100,
+      program: (_e = config.program) != null ? _e : null,
+      builtin: (_f = config.builtin) != null ? _f : { types: [], functions: [] }
+    };
+    return {
+      debug: config_without_services.debug,
+      stopAtPhase: config_without_services.stopAtPhase,
+      strictMode: config_without_services.strictMode,
+      maxErrors: config_without_services.maxErrors,
+      program: config_without_services.program,
+      builtin: config_without_services.builtin,
+      services: this.createServices(config_without_services)
+    };
+  }
   createFinalResult(completedPhase, totalTime) {
     const diagnostics = this.config.services.diagnosticManager.getDiagnostics();
     const hasErrors = diagnostics.some((d) => d.kind === "error" /* ERROR */);
@@ -11838,8 +11736,15 @@ var Analyzer = class _Analyzer {
     }
     return void 0;
   }
-  // └────────────────────────────────────────────────────────────────────┘
+  log(kind = "verbose", message) {
+    this.config.services.debugManager.log(kind, message);
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
 };
+// └──────────────────────────────────────────────────────────────────────┘
+// ┌──────────────────────────────── ---- ────────────────────────────────┐
+_Analyzer.create = (config) => new _Analyzer(config);
+var Analyzer = _Analyzer;
 export {
   AnalysisPhase,
   Analyzer,

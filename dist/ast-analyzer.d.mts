@@ -96,12 +96,8 @@ interface Symbol {
     isExported: boolean;
     exportAlias?: string;
 }
-interface BuiltinSymbolOption {
-    type: AST.TypeNode | null;
-}
 declare class ScopeManager {
     private debugManager;
-    private builtin;
     private static readonly SYMBOL_PROXIMITY_THRESHOLD;
     private scopes;
     private currentScope;
@@ -110,7 +106,7 @@ declare class ScopeManager {
     private namespaceLookup;
     readonly idGenerator: IdGenerator;
     readonly symbolIdGenerator: IdGenerator;
-    constructor(debugManager: DebugManager, builtin: BuiltinConfig);
+    constructor(debugManager: DebugManager);
     init(): void;
     reset(): void;
     createScope(kind: ScopeKind, name: string, parentId: ScopeId | null): Scope;
@@ -1002,7 +998,6 @@ declare class SemanticValidator extends PhaseBase {
     logStatistics(): void;
 }
 
-/** Analysis configuration options */
 interface AnalysisConfig {
     /** Debug output level */
     debug?: DebugKind;
@@ -1016,7 +1011,6 @@ interface AnalysisConfig {
     program: AST.Program;
     builtin: BuiltinConfig;
 }
-/** Analysis result with diagnostics and metadata */
 interface AnalysisResult {
     /** Whether analysis succeeded without errors */
     success: boolean;
@@ -1031,7 +1025,6 @@ interface AnalysisResult {
         memoryUsage?: number;
     };
 }
-/** Internal phase result */
 interface PhaseResult {
     success: boolean;
     phase: AnalysisPhase;
@@ -1039,22 +1032,12 @@ interface PhaseResult {
     errors: number;
     warnings: number;
 }
-/** Analysis services */
 interface AnalysisServices {
     debugManager: DebugManager;
     contextTracker: ContextTracker;
     diagnosticManager: DiagnosticManager;
     scopeManager: ScopeManager;
 }
-/**
- * Multi-phase AST analyzer for je-es language
- *
- * Provides comprehensive analysis including:
- * - Symbol collection and scope management
- * - Symbol resolution and usage validation
- * - Type checking and inference
- * - Semantic validation
- */
 declare class Analyzer {
     config: Required<AnalysisConfig>;
     phaseTimings: Map<AnalysisPhase, number>;
@@ -1063,19 +1046,8 @@ declare class Analyzer {
     typeValidator: TypeValidator;
     semanticValidator: SemanticValidator;
     private constructor();
-    getDiagMgr: () => DiagnosticManager;
-    /** Factory method to create analyzer instance */
-    static create(config?: Partial<AnalysisConfig>): Analyzer;
-    private log;
-    /**
-     * Analyze a program through all configured phases
-     * @param new_program The AST program to analyze
-     * @param config Optional runtime configuration overrides
-     * @returns Analysis result with diagnostics and metadata
-     */
     analyze(new_program: AST.Program | null, config?: Partial<AnalysisConfig>): AnalysisResult;
-    private createServices;
-    private createConfig;
+    reset(): void;
     private executePhase1;
     private executePhase2;
     private executePhase3;
@@ -1083,11 +1055,15 @@ declare class Analyzer {
     private runPhase;
     private validateProgramStructure;
     private shouldStopAtPhase;
-    reset(): void;
+    private createServices;
+    private createConfig;
     private createFinalResult;
     private createErrorResult;
     private createFatalErrorResult;
     private getMemoryUsage;
+    private log;
+    static create: (config?: Partial<AnalysisConfig>) => Analyzer;
+    getDiagMgr: () => DiagnosticManager;
 }
 
-export { type AnalysisConfig, type AnalysisContext, AnalysisPhase, type AnalysisResult, type AnalysisServices, Analyzer, type BuiltinSymbolOption, type ContextSymbolKind, ContextTracker, type DebugKind, DebugManager, type DeclarationContext, DeclarationPhase, DiagCode, DiagKind, type Diagnostic, type DiagnosticFix, DiagnosticManager, ExpressionContext, type ExpressionContextInfo, type PhaseResult, type SavedContextState, type Scope, type ScopeId, ScopeKind, ScopeManager, type Symbol, type SymbolId, SymbolKind };
+export { type AnalysisConfig, type AnalysisContext, AnalysisPhase, type AnalysisResult, type AnalysisServices, Analyzer, type ContextSymbolKind, ContextTracker, type DebugKind, DebugManager, type DeclarationContext, DeclarationPhase, DiagCode, DiagKind, type Diagnostic, type DiagnosticFix, DiagnosticManager, ExpressionContext, type ExpressionContextInfo, type PhaseResult, type SavedContextState, type Scope, type ScopeId, ScopeKind, ScopeManager, type Symbol, type SymbolId, SymbolKind };

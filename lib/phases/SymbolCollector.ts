@@ -11,10 +11,9 @@
     import { DiagCode, DiagKind }   from '../components/DiagnosticManager';
     import { Scope, Symbol, SymbolKind, ScopeKind }
                                     from '../components/ScopeManager';
-    import { PathUtils }            from '../utils/PathUtils';
+    import * as Path                from '../utils/Path';
     import { PhaseBase }            from '../interfaces/PhaseBase';
     import { AnalysisConfig }       from '../ast-analyzer';
-    import { BuiltinConfig }        from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -134,8 +133,8 @@
                     }
 
                     try {
-                        const relativePath = PathUtils.getRelativePath(rootPath, modulePath);
-                        const normalizedPath = PathUtils.normalizePath(relativePath);
+                        const relativePath = Path.getRelativePath(rootPath, modulePath);
+                        const normalizedPath = Path.normalizePath(relativePath);
 
                         // Detect path collisions
                         if (this.pathContext.pathMappings.has(normalizedPath)) {
@@ -483,14 +482,14 @@
                 const currentModule = this.config.program!.modules.get(moduleName);
                 const currentModulePath = currentModule?.metadata?.path as string | undefined;
 
-                if (!PathUtils.validatePath(this.config.program!, useNode.path, currentModulePath)) {
+                if (!Path.validatePath(this.config.program!, useNode.path, currentModulePath)) {
                     this.reportError(DiagCode.MODULE_NOT_FOUND, `Module not found in path '${useNode.path}'`, useNode.pathSpan);
                     this.stats.importResolutionFailures++;
                     return;
                 }
 
-                const resolvedPath = PathUtils.resolveModulePath(this.config.program!, useNode.path, currentModulePath);
-                const targetModuleName = PathUtils.findModuleNameByPath(this.config.program!, resolvedPath);
+                const resolvedPath = Path.resolveModulePath(this.config.program!, useNode.path, currentModulePath);
+                const targetModuleName = Path.findModuleNameByPath(this.config.program!, resolvedPath);
 
                 if (!targetModuleName) {
                     this.reportError(DiagCode.MODULE_NOT_FOUND, `Could not resolve module name for path: ${useNode.path}`, useNode.span);
@@ -1702,7 +1701,7 @@
 
             private handleUnionType(unionType: AST.UnionTypeNode, parentScope: Scope, moduleName: string): void {
                 for (const variant of unionType.types) {
-                    // CRITICAL FIX: Create isolated scope for each union member
+                    // Create isolated scope for each union member
                     if (variant.isStruct()) {
                         const anonId = this.config.services.scopeManager.symbolIdGenerator.next();
                         const scopeName = `<union-struct-${anonId}>`;

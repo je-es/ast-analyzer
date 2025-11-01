@@ -1,4 +1,8 @@
-// Analyzer.ts — A library for analyzing and validating Abstract Syntax Trees.
+// ast-analyzer.ts — Multi-phase semantic analyzer with type validation,
+//                   error handling, and LSP support for compilers.
+//
+// repo   : https://github.com/je-es/ast-analyzer
+// author : https://github.com/maysara-elshewehy
 //
 // Developed with ❤️ by Maysara.
 
@@ -6,18 +10,18 @@
 
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
-    import * as AST                                 from '@je-es/ast';
-    import * as Diag                                from './components/DiagnosticManager';
-    import { ContextTracker, AnalysisPhase }        from './components/ContextTracker';
-    import { DebugManager, DebugKind }              from './components/DebugManager';
-    import { ScopeManager }                         from './components/ScopeManager';
-    import { SymbolCollector }                      from './phases/SymbolCollector';
-    import { SymbolResolver }                       from './phases/SymbolResolver';
-    import { TypeValidator }                        from './phases/TypeValidator/TypeValidator';
-    import { SemanticValidator }                    from './phases/SemanticValidator';
-    import { BuiltinConfig }                        from '@je-es/syntax';
+    import * as AST                             from '@je-es/ast';
+    import * as Diag                            from './components/DiagnosticManager';
+    import { ContextTracker, AnalysisPhase }    from './components/ContextTracker';
+    import { DebugManager, DebugKind }          from './components/DebugManager';
+    import { ScopeManager }                     from './components/ScopeManager';
+    import { SymbolCollector }                  from './phases/SymbolCollector';
+    import { SymbolResolver }                   from './phases/SymbolResolver';
+    import { TypeValidator }                    from './phases/TypeValidator/TypeValidator';
+    import { SemanticValidator }                from './phases/SemanticValidator';
+    import { BuiltinConfig }                    from '@je-es/syntax';
 
-    // Re-export
+    // export
     export * from './components/DiagnosticManager';
     export * from './components/ScopeManager';
     export * from './components/DebugManager';
@@ -29,7 +33,6 @@
 
 // ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
 
-    /** Analysis configuration options */
     export interface AnalysisConfig {
         /** Debug output level */
         debug               ?: DebugKind;
@@ -47,7 +50,6 @@
         builtin             : BuiltinConfig;
     }
 
-    /** Analysis result with diagnostics and metadata */
     export interface AnalysisResult {
 
         /** Whether analysis succeeded without errors */
@@ -70,7 +72,6 @@
         };
     }
 
-    /** Internal phase result */
     export interface PhaseResult {
         success             : boolean;
         phase               : AnalysisPhase;
@@ -79,7 +80,6 @@
         warnings            : number;
     }
 
-    /** Analysis services */
     export interface AnalysisServices {
         debugManager        : DebugManager;
         contextTracker      : ContextTracker;
@@ -93,18 +93,9 @@
 
 // ╔════════════════════════════════════════ CORE ════════════════════════════════════════╗
 
-    /**
-     * Multi-phase AST analyzer for je-es language
-     *
-     * Provides comprehensive analysis including:
-     * - Symbol collection and scope management
-     * - Symbol resolution and usage validation
-     * - Type checking and inference
-     * - Semantic validation
-     */
     export class Analyzer {
 
-        // ┌────────────────────────── INITIALIZATION ──────────────────────────┐
+        // ┌──────────────────────────────── INIT ────────────────────────────────┐
 
             config              : Required<AnalysisConfig>;
             phaseTimings        : Map<AnalysisPhase, number> = new Map();
@@ -126,28 +117,11 @@
                 this.log('verbose', `🚀 Analyzer initialized with config: ${JSON.stringify(this.config)}`);
             }
 
-            getDiagMgr = () => this.config.services.diagnosticManager;
-
-            /** Factory method to create analyzer instance */
-            static create(config?: Partial<AnalysisConfig>): Analyzer {
-                return new Analyzer(config);
-            }
-
-            private log(kind: DebugKind = 'verbose', message: string ) {
-                this.config.services.debugManager.log(kind, message);
-            }
-
-        // └────────────────────────────────────────────────────────────────────┘
+        // └──────────────────────────────────────────────────────────────────────┘
 
 
-        // ┌──────────────────────── MAIN ANALYSIS INTERFACE ───────────────────┐
+        // ┌──────────────────────────────── MAIN ────────────────────────────────┐
 
-            /**
-             * Analyze a program through all configured phases
-             * @param new_program The AST program to analyze
-             * @param config Optional runtime configuration overrides
-             * @returns Analysis result with diagnostics and metadata
-             */
             analyze(new_program: AST.Program | null, config?: Partial<AnalysisConfig>): AnalysisResult {
                 const startTime = Date.now();
                 this.log('verbose', '🔍 Starting multi-phase analysis...');
@@ -224,43 +198,25 @@
                 }
             }
 
-            private createServices(config : Partial<AnalysisConfig>): AnalysisServices {
-                const debugManager       = new DebugManager(undefined, config.debug ?? 'off');
-                const contextTracker     = new ContextTracker(debugManager);
-                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config.strictMode ?? false);
-                if(config.builtin === undefined) throw new Error('Builtin symbols must be provided');
-                const scopeManager       = new ScopeManager(debugManager, config.builtin!);
+            reset(): void {
+                this.log('verbose', '🔄 Resetting analyzer state...');
 
-                return { debugManager, contextTracker, diagnosticManager, scopeManager }
+                this.phaseTimings.clear();
+                this.config.services.contextTracker.reset();
+                this.config.services.diagnosticManager.reset();
+                this.config.services.debugManager.reset();
+                this.config.services.scopeManager.reset();
+
+                this.symbolCollector.reset();
+                this.symbolResolver.reset();
+                this.typeValidator.reset();
+                this.semanticValidator.reset();
             }
 
-            private createConfig(config: Partial<AnalysisConfig>): Required<AnalysisConfig> {
-                if(!config.program) {
-                    throw new Error("Program must be provided")
-                }
-                const config_without_services : Partial<AnalysisConfig> = {
-                    debug           : config.debug          ?? 'off',
-                    stopAtPhase     : config.stopAtPhase    ?? AnalysisPhase.SemanticValidation,
-                    strictMode      : config.strictMode     ?? false,
-                    maxErrors       : config.maxErrors      ?? 100,
-                    program         : config.program        ?? null,
-                    builtin         : config.builtin        ?? { types: [], functions: [] },
-                };
+        // └──────────────────────────────────────────────────────────────────────┘
 
-                return {
-                    debug           : config_without_services.debug!,
-                    stopAtPhase     : config_without_services.stopAtPhase!,
-                    strictMode      : config_without_services.strictMode!,
-                    maxErrors       : config_without_services.maxErrors!,
-                    program         : config_without_services.program!,
-                    builtin         : config_without_services.builtin!,
-                    services        : this.createServices(config_without_services)
-                }
-            }
 
-        // └────────────────────────────────────────────────────────────────────┘
-
-        // ┌────────────────────────── PHASE EXECUTION ─────────────────────────┐
+        // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             private executePhase1(): boolean {
                 this.log('symbols', '📂 Phase 1: Symbol Collection');
@@ -324,9 +280,10 @@
                 }
             }
 
-        // └────────────────────────────────────────────────────────────────────┘
+        // └──────────────────────────────────────────────────────────────────────┘
 
-        // ┌─────────────────────── VALIDATION AND UTILITIES ───────────────────┐
+
+        // ┌──────────────────────────────── ---- ────────────────────────────────┐
 
             private validateProgramStructure(program: AST.Program): boolean {
                 if (!program) {
@@ -372,24 +329,44 @@
                 return currentIndex > targetIndex;
             }
 
-            reset(): void {
-                this.log('verbose', '🔄 Resetting analyzer state...');
+        // └──────────────────────────────────────────────────────────────────────┘
 
-                this.phaseTimings.clear();
-                this.config.services.contextTracker.reset();
-                this.config.services.diagnosticManager.reset();
-                this.config.services.debugManager.reset();
-                this.config.services.scopeManager.reset();
 
-                this.symbolCollector.reset();
-                this.symbolResolver.reset();
-                this.typeValidator.reset();
-                this.semanticValidator.reset();
+        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+
+            private createServices(config : Partial<AnalysisConfig>): AnalysisServices {
+                const debugManager       = new DebugManager(undefined, config.debug ?? 'off');
+                const contextTracker     = new ContextTracker(debugManager);
+                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config.strictMode ?? false);
+                if(config.builtin === undefined) throw new Error('Builtin symbols must be provided');
+                const scopeManager       = new ScopeManager(debugManager);
+
+                return { debugManager, contextTracker, diagnosticManager, scopeManager }
             }
 
-        // └────────────────────────────────────────────────────────────────────┘
+            private createConfig(config: Partial<AnalysisConfig>): Required<AnalysisConfig> {
+                if(!config.program) {
+                    throw new Error("Program must be provided")
+                }
+                const config_without_services : Partial<AnalysisConfig> = {
+                    debug           : config.debug          ?? 'off',
+                    stopAtPhase     : config.stopAtPhase    ?? AnalysisPhase.SemanticValidation,
+                    strictMode      : config.strictMode     ?? false,
+                    maxErrors       : config.maxErrors      ?? 100,
+                    program         : config.program        ?? null,
+                    builtin         : config.builtin        ?? { types: [], functions: [] },
+                };
 
-        // ┌───────────────────────── RESULT GENERATION ────────────────────────┐
+                return {
+                    debug           : config_without_services.debug!,
+                    stopAtPhase     : config_without_services.stopAtPhase!,
+                    strictMode      : config_without_services.strictMode!,
+                    maxErrors       : config_without_services.maxErrors!,
+                    program         : config_without_services.program!,
+                    builtin         : config_without_services.builtin!,
+                    services        : this.createServices(config_without_services)
+                }
+            }
 
             private createFinalResult(completedPhase: AnalysisPhase, totalTime: number): AnalysisResult {
                 const diagnostics = this.config.services.diagnosticManager.getDiagnostics();
@@ -442,7 +419,20 @@
                 return undefined;
             }
 
-        // └────────────────────────────────────────────────────────────────────┘
+            private log(kind: DebugKind = 'verbose', message: string ) {
+                this.config.services.debugManager.log(kind, message);
+            }
+
+        // └──────────────────────────────────────────────────────────────────────┘
+
+
+        // ┌──────────────────────────────── ---- ────────────────────────────────┐
+
+            static create = (config?: Partial<AnalysisConfig>) => new Analyzer(config);
+
+            getDiagMgr = () => this.config.services.diagnosticManager;
+
+        // └──────────────────────────────────────────────────────────────────────┘
     }
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝

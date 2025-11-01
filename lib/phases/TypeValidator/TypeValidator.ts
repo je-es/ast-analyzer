@@ -15,7 +15,6 @@
                                         from '../../components/ScopeManager';
     import { ExpressionEvaluator }      from './ExpressionEvaluator';
     import { TypeInference }            from './TypeInference';
-import { BuiltinConfig } from '@je-es/syntax';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 

@@ -9,7 +9,7 @@
     import * as ParseLib                from '@je-es/parser';
     import { ParseError }               from '@je-es/parser';
     import * as AST                     from '@je-es/ast';
-    import * as sesh                    from '@kemet-lang/sesh';
+    import * as sesh                    from '@kemet-lang/sesh'; // TODO: add to devDependencies.
     import { Analyzer, AnalysisPhase, Diagnostic, AnalysisResult, DiagCode, DiagKind }
                                         from '../lib/ast-analyzer';
 

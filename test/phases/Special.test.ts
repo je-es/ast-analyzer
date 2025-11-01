@@ -3053,7 +3053,7 @@
                 }]
             },
 
-            // Mutable + Mutable (should pass if you support mutable arrays)
+            // Mutable + Mutable
             {
                 name: 'slice - mutable + mutable concatenation',
                 input: `
@@ -3397,7 +3397,7 @@
             },
 
             {
-                input: `for(0..5) { let x = @i(1); } // Error, you try to access to higher index which is unexists ! `,
+                input: `for(0..5) { let x = @i(1); }`,
                 success: false,
                 diagnostics: [
                     {

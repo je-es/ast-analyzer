@@ -6,11 +6,9 @@
 
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
-    import { BuiltinConfig }        from '@je-es/syntax';
     import * as AST                 from '@je-es/ast';
     import { IdGenerator }          from "./IdGenerator";
     import { DebugManager }         from './DebugManager';
-    import { DiagnosticManager}     from './DiagnosticManager';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -103,10 +101,6 @@
         exportAlias?    : string;       // Export alias
     }
 
-    export interface BuiltinSymbolOption {
-        type            : AST.TypeNode | null
-    }
-
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
 
@@ -130,7 +124,6 @@
 
             constructor(
                 private debugManager    : DebugManager,
-                private builtin         : BuiltinConfig
             ) {
                 this.idGenerator        = new IdGenerator();
                 this.symbolIdGenerator  = new IdGenerator();
@@ -151,9 +144,6 @@
                 // Create global scope
                 this.globalScope = this.createScope(ScopeKind.Global, 'global', null);
                 this.currentScope = this.globalScope.id;
-
-                // // Initialize built-in symbols
-                // this.initializeBuiltins();
             }
 
             reset(): void {
@@ -172,9 +162,6 @@
                 // Clear global scope symbols but keep the scope itself
                 this.globalScope.symbols.clear();
                 this.globalScope.children = [];
-
-                // // Reinitialize built-ins
-                // this.initializeBuiltins();
             }
 
             createScope(kind: ScopeKind, name: string, parentId: ScopeId | null): Scope {
@@ -434,67 +421,6 @@
 
                 return null;
             }
-
-        // └──────────────────────────────────────────────────────────────────────┘
-
-
-        // ┌────────────────────────────── BUILTINS ──────────────────────────────┐
-
-            // private initializeBuiltins(): void {
-            //     // Types
-            //     for (const T of this.builtin.types) {
-            //         this.createBuiltinSymbol(SymbolKind.Type, T.name, {
-            //             type: T.type,
-            //             callable: T.callable,
-            //             metadata: T.metadata
-            //         });
-            //     }
-
-            //     // Functions
-            //     for(const F of this.builtin.functions) {
-            //         this.createBuiltinSymbol(SymbolKind.Function, F.name, {
-            //             type: F.type,
-            //             callable: F.callable,
-                        
-            //             metadata: F.metadata
-            //         });
-            //     }
-            // }
-
-            // private createBuiltinSymbol(
-            //     kind: SymbolKind,
-            //     name: string,
-            //     options: { type: AST.TypeNode | null; callable?: boolean; metadata?: any }
-            // ): Symbol {
-            //     const symbol: Symbol = {
-            //         id: this.symbolIdGenerator.next(),
-            //         kind,
-            //         name,
-            //         contextSpan: { start: 0, end: 0 },
-            //         scope: this.globalScope.id,
-            //         visibility: { kind: 'Public' },
-            //         mutability: { kind: 'Immutable'},
-            //         type: options.type,
-            //         used: false,
-            //         initialized: true,
-            //         declared: true,
-            //         isTypeChecked: true,
-            //         isExported: false,
-            //         metadata: {
-            //             callable: options.callable || false,
-            //             isBuiltin: true,
-            //             ...options.metadata
-            //         }
-            //     };
-
-            //     this.globalScope.symbols.set(name, symbol);
-            //     this.symbolTable.set(symbol.id, symbol);
-
-            //     // REMOVED: The check should not be here during symbol creation
-            //     // It should only happen once after ALL symbols are added
-
-            //     return symbol;
-            // }
 
         // └──────────────────────────────────────────────────────────────────────┘
 

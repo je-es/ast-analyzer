@@ -2,12 +2,16 @@
 //
 // Developed with ❤️ by Maysara.
 
+
+
 // ╔════════════════════════════════════════ PACK ════════════════════════════════════════╗
 
     import { Span }                 from '@je-es/ast';
     import { ContextTracker }       from './ContextTracker';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
+
+
 
 // ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
 
@@ -176,6 +180,8 @@
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
+
+
 // ╔════════════════════════════════════════ CORE ════════════════════════════════════════╗
 
     export class DiagnosticManager {
@@ -192,6 +198,7 @@
             }
 
         // └────────────────────────────────────────────────────────────────────┘
+
 
         // ┌──────────────────────────────── MAIN ──────────────────────────────┐
 
@@ -273,6 +280,7 @@
 
         // └────────────────────────────────────────────────────────────────────┘
 
+
         // ┌──────────────────────────────── HELP ──────────────────────────────┐
 
             private isMoreSpecific(d1: Diagnostic, d2: Diagnostic): boolean {
@@ -336,26 +344,10 @@
                 return (priority[d1.kind] || 0) > (priority[d2.kind] || 0);
             }
 
-            // TODO: ignore diags like this (from "global-scope-module")
-        //      {
-        //         "code": "UNUSED_PARAMETER",
-        //         "kind": "warning",
-        //         "msg": "Parameter 'level' is declared but never used",
-        //         "targetSpan": {
-        //             "start": 0,
-        //             "end": 0
-        //         },
-        //         "sourceModuleName": "global-scope-module",
-        //         "sourceModulePath": "./src/main.k",
-        //         "contextSpan": {
-        //             "start": 0,
-        //             "end": 0
-        //         }
-        //      }
             private filterDuplicates(diagnostics: Diagnostic[]): Diagnostic[] {
                 const seen = new Map<string, Diagnostic>();
 
-                const filtered = diagnostics.filter(d => 
+                const filtered = diagnostics.filter(d =>
                     !(d.sourceModuleName === "global-scope-module")
                 );
 
