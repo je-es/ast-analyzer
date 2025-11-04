@@ -74,7 +74,8 @@
         Resolution              = 'Resolution',
         TypeValidation          = 'TypeValidation',
         SemanticValidation      = 'SemanticValidation',
-        FinalValidation         = 'FinalValidation'
+        FinalValidation         = 'FinalValidation',
+        Formatting              = 'Formatting'
     }
 
     export type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'use' | 'def';
@@ -162,7 +163,7 @@
                     loopDepth               : this.context.loopDepth
                 };
 
-                this.debugManager?.log('verbose',
+                this.debugManager?.log('context',
                     `💾 Saved context state: scope=${state.scopeId}, ` +
                     `module=${state.moduleName}, spans=${state.spanStackDepth}`
                 );
@@ -171,7 +172,7 @@
             }
 
             restoreState(state: SavedContextState): void {
-                this.debugManager?.log('verbose',
+                this.debugManager?.log('context',
                     `♻️  Restoring context state: scope=${state.scopeId}, module=${state.moduleName}`
                 );
 
@@ -241,25 +242,25 @@
 
             setModuleName(moduleName: string): void {
                 this.context.currentModuleName = moduleName;
-                this.debugManager?.log('verbose', `Context: Set module name to '${moduleName}'`);
+                this.debugManager?.log('context', `Context: Set module name to '${moduleName}'`);
             }
 
             setModulePath(modulePath: string): void {
                 this.context.currentModulePath = modulePath;
-                this.debugManager?.log('verbose', `Context: Set module path to '${modulePath}'`);
+                this.debugManager?.log('context', `Context: Set module path to '${modulePath}'`);
             }
 
             pushPhase(phase: AnalysisPhase): void {
                 this.phaseStack.push(this.currentPhase);
                 this.setPhase(phase);
-                this.debugManager?.log('verbose', `Context: Pushed phase '${phase}' (stack: ${this.phaseStack.length})`);
+                this.debugManager?.log('context', `Context: Pushed phase '${phase}' (stack: ${this.phaseStack.length})`);
             }
 
             popPhase(): AnalysisPhase | undefined {
                 const previousPhase = this.phaseStack.pop();
                 if (previousPhase) {
                     this.setPhase(previousPhase);
-                    this.debugManager?.log('verbose', `Context: Popped phase, returned to '${previousPhase}'`);
+                    this.debugManager?.log('context', `Context: Popped phase, returned to '${previousPhase}'`);
                 }
                 return previousPhase;
             }
@@ -267,7 +268,7 @@
             setPhase(phase: AnalysisPhase): void {
                 this.currentPhase = phase;
                 this.context.currentPhase = phase;
-                this.debugManager?.log('verbose', `Context: Entered phase '${phase}'`);
+                this.debugManager?.log('context', `Context: Entered phase '${phase}'`);
             }
 
             getCurrentPhase(): AnalysisPhase | undefined {
@@ -286,24 +287,24 @@
             setCurrentContextSpan(span?: AST.Span): void {
                 if (span) {
                     this.context.contextSpanStack.push(span);
-                    this.debugManager?.log('verbose', `Context: Pushed span [${span.start}-${span.end}] (stack depth: ${this.context.contextSpanStack.length})`);
+                    this.debugManager?.log('context', `Context: Pushed span [${span.start}-${span.end}] (stack depth: ${this.context.contextSpanStack.length})`);
                 } else {
                     if (this.context.contextSpanStack.length > 0) {
                         const removed = this.context.contextSpanStack.pop();
-                        this.debugManager?.log('verbose', `Context: Popped span [${removed?.start}-${removed?.end}] (stack depth: ${this.context.contextSpanStack.length})`);
+                        this.debugManager?.log('context', `Context: Popped span [${removed?.start}-${removed?.end}] (stack depth: ${this.context.contextSpanStack.length})`);
                     }
                 }
             }
 
             pushContextSpan(span: AST.Span): void {
                 this.context.contextSpanStack.push(span);
-                this.debugManager?.log('verbose', `Context: Pushed scoped span [${span.start}-${span.end}]`);
+                this.debugManager?.log('context', `Context: Pushed scoped span [${span.start}-${span.end}]`);
             }
 
             popContextSpan(): AST.Span | undefined {
                 const span = this.context.contextSpanStack.pop();
                 if (span) {
-                    this.debugManager?.log('verbose', `Context: Popped scoped span [${span.start}-${span.end}]`);
+                    this.debugManager?.log('context', `Context: Popped scoped span [${span.start}-${span.end}]`);
                 }
                 return span;
             }
@@ -311,7 +312,7 @@
             clearContextSpans(): void {
                 const count = this.context.contextSpanStack.length;
                 this.context.contextSpanStack = [];
-                this.debugManager?.log('verbose', `Context: Cleared ${count} context spans`);
+                this.debugManager?.log('context', `Context: Cleared ${count} context spans`);
             }
 
         // └────────────────────────────────────────────────────────────────────┘
@@ -339,14 +340,14 @@
                 this.context.processingSymbols.add(symbolId);
                 this.pushContextSpan(span);
 
-                this.debugManager?.log('verbose', `Context: Started declaration of ${symbolKind} '${symbolName}' (id: ${symbolId})`);
+                this.debugManager?.log('context', `Context: Started declaration of ${symbolKind} '${symbolName}' (id: ${symbolId})`);
             }
 
             startInitialization(symbolId: SymbolId): void {
                 const current = this.getCurrentDeclaration();
                 if (current && current.symbolId === symbolId) {
                     current.phase = DeclarationPhase.InInitialization;
-                    this.debugManager?.log('verbose', `Context: Started initialization of symbol '${current.symbolName}' (id: ${symbolId})`);
+                    this.debugManager?.log('context', `Context: Started initialization of symbol '${current.symbolName}' (id: ${symbolId})`);
                 }
             }
 
@@ -357,7 +358,7 @@
                     declaration.phase = DeclarationPhase.PostDeclaration;
                     this.context.declarationStack.splice(index, 1);
                     this.popContextSpan();
-                    this.debugManager?.log('verbose', `Context: Completed declaration of '${declaration.symbolName}' (id: ${symbolId})`);
+                    this.debugManager?.log('context', `Context: Completed declaration of '${declaration.symbolName}' (id: ${symbolId})`);
                 }
 
                 this.context.processingSymbols.delete(symbolId);
@@ -385,14 +386,14 @@
 
             enterExpression(type: ExpressionContext, span: AST.Span, relatedSymbol?: SymbolId): void {
                 if (!span) {
-                    this.debugManager?.log('verbose', 'Warning: Attempted to enter expression context without span');
+                    this.debugManager?.log('context', 'Warning: Attempted to enter expression context without span');
                     return;
                 }
 
                 const depth = this.context.expressionStack.length;
                 this.context.expressionStack.push({ type, relatedSymbol, depth, span });
                 this.pushContextSpan(span);
-                this.debugManager?.log('verbose', `Context: Entered expression ${type} at depth ${depth}`);
+                this.debugManager?.log('context', `Context: Entered expression ${type} at depth ${depth}`);
             }
 
             exitExpression(): ExpressionContextInfo | undefined {
@@ -404,7 +405,7 @@
                 this.popContextSpan();
 
                 if (exited) {
-                    this.debugManager?.log('verbose', `Context: Exited expression ${exited.type} from depth ${exited.depth}`);
+                    this.debugManager?.log('context', `Context: Exited expression ${exited.type} from depth ${exited.depth}`);
                 }
 
                 return exited;
@@ -504,13 +505,13 @@
 
             enterLoop(): void {
                 this.context.loopDepth++;
-                this.debugManager?.log('verbose', `Context: Entered loop (depth: ${this.context.loopDepth})`);
+                this.debugManager?.log('context', `Context: Entered loop (depth: ${this.context.loopDepth})`);
             }
 
             exitLoop(): void {
                 if (this.context.loopDepth > 0) {
                     this.context.loopDepth--;
-                    this.debugManager?.log('verbose', `Context: Exited loop (depth: ${this.context.loopDepth})`);
+                    this.debugManager?.log('context', `Context: Exited loop (depth: ${this.context.loopDepth})`);
                 } else {
                     this.debugManager?.log('errors', `Context: Attempted to exit loop when not in any loop`);
                 }

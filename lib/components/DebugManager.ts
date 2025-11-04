@@ -14,7 +14,7 @@
 
 // ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
 
-    export type DebugKind = 'off' | 'errors' | 'symbols' | 'scopes' | 'nodes' | 'verbose';
+    export type DebugKind = 'off' | 'errors' | 'symbols' | 'scopes' | 'nodes' | 'verbose' | 'context';
 
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -30,6 +30,7 @@
             private indentLevel         = 0;
             private contextTracker?     : ContextTracker;
             private lastMessage         : string = '';
+            public  alive               = true;
 
             constructor(contextTracker?: ContextTracker, debugLevel: DebugKind = 'off') {
                 this.debugLevel         = debugLevel;
@@ -45,8 +46,16 @@
 
         // ┌──────────────────────────────── MAIN ──────────────────────────────┐
 
+            pause(): void {
+                this.alive = false;
+            }
+
+            resume(): void {
+                this.alive = true;
+            }
+
             log(level: DebugKind, message: string): void {
-                if (this.debugLevel === 'off') {return;}
+                if (this.debugLevel === 'off' || !this.alive) { return; }
 
                 const levels: DebugKind[] = ['off', 'errors', 'symbols', 'scopes', 'nodes', 'verbose'];
                 const currentIndex = levels.indexOf(this.debugLevel);

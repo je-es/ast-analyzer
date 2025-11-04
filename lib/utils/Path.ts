@@ -19,44 +19,100 @@
     export function resolveModulePath(program: Program, importPath: string, currentModulePath?: string): string {
         const programRoot = program.metadata?.path as string || './';
 
+        // Normalize the import path and add .k extension if missing
+        let normalizedImport = importPath;
+        if (!normalizedImport.endsWith('.k')) {
+            normalizedImport = normalizedImport + '.k';
+        }
+
         // If import path starts with '.' or '..', resolve relative to current module
-        if (importPath.startsWith('.') && currentModulePath) {
+        if (normalizedImport.startsWith('.') && currentModulePath) {
             const currentDir = path.dirname(currentModulePath);
-            const resolved = path.resolve(currentDir, importPath);
-            // Normalize to relative path from program root
+            const resolved = path.resolve(currentDir, normalizedImport);
             return path.relative(programRoot, resolved);
         }
 
-        // For absolute imports, resolve from program root
-        if (path.isAbsolute(importPath)) {
-            return path.relative(programRoot, importPath);
+        // For paths without ./ prefix, try both with and without
+        if (!normalizedImport.startsWith('.')) {
+            normalizedImport = './' + normalizedImport;
         }
 
-        // Otherwise resolve relative to program root
-        return path.normalize(importPath);
+        // For absolute imports, resolve from program root
+        if (path.isAbsolute(normalizedImport)) {
+            return path.relative(programRoot, normalizedImport);
+        }
+
+        // Otherwise resolve relative to program root or current module
+        if (currentModulePath) {
+            const currentDir = path.dirname(currentModulePath);
+            return path.relative(programRoot, path.resolve(currentDir, normalizedImport));
+        }
+
+        return path.normalize(normalizedImport);
     }
 
-    // Finds a module by its resolved path
+    // Finds a module by its resolved path - with fuzzy matching
     export function findModuleByPath(program: Program, targetPath: string): Module | undefined {
         const programRoot = program.metadata?.path as string || './';
-        const normalizedTarget = path.normalize(targetPath);
+
+        // Helper to generate all possible path variations
+        const generateVariations = (p: string): string[] => {
+            const normalized = path.normalize(p).replace(/\\/g, '/');
+            const variations = new Set<string>();
+
+            // Add the path as-is
+            variations.add(normalized);
+
+            // Add with/without .k extension
+            if (normalized.endsWith('.k')) {
+                variations.add(normalized.slice(0, -2));
+            } else {
+                variations.add(normalized + '.k');
+            }
+
+            // Add with/without ./ prefix
+            if (normalized.startsWith('./')) {
+                const withoutPrefix = normalized.substring(2);
+                variations.add(withoutPrefix);
+                if (withoutPrefix.endsWith('.k')) {
+                    variations.add(withoutPrefix.slice(0, -2));
+                } else {
+                    variations.add(withoutPrefix + '.k');
+                }
+            } else {
+                variations.add('./' + normalized);
+                if (normalized.endsWith('.k')) {
+                    variations.add('./' + normalized.slice(0, -2));
+                } else {
+                    variations.add('./' + normalized + '.k');
+                }
+            }
+
+            return Array.from(variations);
+        };
+
+        const targetVariations = generateVariations(targetPath);
 
         for (const [_, module] of program.modules) {
             const modulePath = module.metadata?.path as string | undefined;
             if (!modulePath) continue;
 
-            // Compare both absolute and relative paths
             const relativeModulePath = path.relative(programRoot, modulePath);
-            const normalizedModulePath = path.normalize(modulePath);
-            const normalizedRelativePath = path.normalize(relativeModulePath);
+            const moduleVariations = generateVariations(modulePath);
+            moduleVariations.push(...generateVariations(relativeModulePath));
 
-            if (normalizedModulePath === normalizedTarget ||
-                normalizedRelativePath === normalizedTarget ||
-                modulePath === targetPath ||
-                relativeModulePath === targetPath) {
-                return module;
+            // Check if any target variation matches any module variation
+            for (const targetVar of targetVariations) {
+                for (const moduleVar of moduleVariations) {
+                    if (targetVar === moduleVar ||
+                        moduleVar.endsWith(targetVar) ||
+                        targetVar.endsWith(moduleVar)) {
+                        return module;
+                    }
+                }
             }
         }
+
         return undefined;
     }
 

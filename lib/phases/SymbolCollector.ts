@@ -76,18 +76,10 @@
 
                     if (!this.init()) { return false; }
                     if (!this.buildPathMappings()) { return false; }
+
+                    this.config.services.debugManager.pause();
                     if (!this.collectBuiltins(globalScope)) { return false; }
-
-                    // Print Builtins
-                    {
-                        // get all symbols from the global scope
-                        const symbols = this.config.services.scopeManager.getScope(globalScope.id).symbols;
-
-                        // console.log('Builtins:');
-                        // for (const symbol of symbols) {
-                        //     console.log(`  ${JSON.stringify(symbol, null, 2)}`);
-                        // }
-                    }
+                    this.config.services.debugManager.resume();
 
                     if (!this.collectAllModules()) { return false; }
 
@@ -162,19 +154,104 @@
 
             private collectAllModules(): boolean {
                 this.log('verbose', 'Collecting symbols from all modules...');
-                // [1] global scope and builtin
                 const globalScope = this.config.services.scopeManager.getCurrentScope();
 
-                // [2] ..
+                // ========== PASS 1: Collect ALL definitions from ALL modules ==========
                 for (const [moduleName, module] of this.config.program!.modules) {
                     this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
                     try {
-                        if (!this.collectModule(moduleName, module, globalScope)) {
-                            if (this.config.services.contextTracker.getCurrentPhase() === AnalysisPhase.Collection) {
-                                this.log('errors', `Failed to collect from module ${moduleName}, continuing...`);
+                        this.config.services.contextTracker.setModuleName(moduleName);
+                        const modulePath = module.metadata?.path as string;
+                        if (modulePath) {
+                            this.config.services.contextTracker.setModulePath(modulePath);
+                            this.pathContext.currentModulePath = modulePath;
+                        }
+
+                        const moduleScope = this.createModuleScope(moduleName, globalScope);
+
+                        // ONLY collect definitions (def, let, func) - NOT imports
+                        // Also handle sections that contain these statements
+                        for (const statement of module.stmts) {
+                            if (statement.kind === 'def' || statement.kind === 'let' || statement.kind === 'func') {
+                                this.collectStmt(statement, moduleScope, moduleName);
+                            } else if (statement.kind === 'section') {
+                                // Collect definitions inside sections
+                                const sectionNode = statement.getSection();
+                                if (sectionNode) {
+                                    for (const sectionStmt of sectionNode.stmts) {
+                                        if (sectionStmt.kind === 'def' || sectionStmt.kind === 'let' || sectionStmt.kind === 'func') {
+                                            this.collectStmt(sectionStmt, moduleScope, moduleName);
+                                        }
+                                    }
+                                }
                             }
                         }
+
                         this.stats.modulesProcessed++;
+                    } finally {
+                        this.config.services.contextTracker.popContextSpan();
+                    }
+                }
+
+                // ========== PASS 2: Process ALL imports from ALL modules ==========
+                for (const [moduleName, module] of this.config.program!.modules) {
+                    this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
+                    try {
+                        this.config.services.contextTracker.setModuleName(moduleName);
+                        const modulePath = module.metadata?.path as string;
+                        if (modulePath) {
+                            this.config.services.contextTracker.setModulePath(modulePath);
+                        }
+
+                        const moduleScope = this.config.services.scopeManager.findScopeByName(moduleName, ScopeKind.Module);
+                        if (!moduleScope) {
+                            this.log('errors', `Module scope for '${moduleName}' not found`);
+                            continue;
+                        }
+
+                        // ONLY process imports (including those inside sections)
+                        for (const statement of module.stmts) {
+                            if (statement.kind === 'use') {
+                                this.collectStmt(statement, moduleScope, moduleName);
+                            } else if (statement.kind === 'section') {
+                                const sectionNode = statement.getSection();
+                                if (sectionNode) {
+                                    for (const sectionStmt of sectionNode.stmts) {
+                                        if (sectionStmt.kind === 'use') {
+                                            this.collectStmt(sectionStmt, moduleScope, moduleName);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        this.config.services.contextTracker.popContextSpan();
+                    }
+                }
+
+                // ========== PASS 3: Process everything else ==========
+                for (const [moduleName, module] of this.config.program!.modules) {
+                    this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
+                    try {
+                        const moduleScope = this.config.services.scopeManager.findScopeByName(moduleName, ScopeKind.Module);
+                        if (!moduleScope) continue;
+
+                        for (const statement of module.stmts) {
+                            if (statement.kind === 'section') {
+                                const sectionNode = statement.getSection();
+                                if (sectionNode) {
+                                    for (const sectionStmt of sectionNode.stmts) {
+                                        if (sectionStmt.kind !== 'def' && sectionStmt.kind !== 'let' &&
+                                            sectionStmt.kind !== 'func' && sectionStmt.kind !== 'use') {
+                                            this.collectStmt(sectionStmt, moduleScope, moduleName);
+                                        }
+                                    }
+                                }
+                            } else if (statement.kind !== 'def' && statement.kind !== 'let' &&
+                                    statement.kind !== 'func' && statement.kind !== 'use') {
+                                this.collectStmt(statement, moduleScope, moduleName);
+                            }
+                        }
                     } finally {
                         this.config.services.contextTracker.popContextSpan();
                     }
@@ -234,45 +311,24 @@
             private collectModule(moduleName: string, module: AST.Module, parentScope: Scope): boolean {
                 this.log('symbols', `Collecting from module '${moduleName}'`);
 
-                // Reset type context for each module
-                this.typeContext = this.initTypeContext();
-
                 try {
                     this.config.services.contextTracker.setModuleName(moduleName);
-                    const modulePath = module.metadata?.path as string;
-                    if (modulePath) {
-                        this.config.services.contextTracker.setModulePath(modulePath);
-                        this.pathContext.currentModulePath = modulePath;
+
+                    if (typeof module.metadata?.path === 'string') {
+                        this.config.services.contextTracker.setModulePath(module.metadata.path);
+                        this.pathContext.currentModulePath = module.metadata.path;
                     }
 
                     const moduleScope = this.createModuleScope(moduleName, parentScope);
 
-                    // PASS 1: Collect all local definitions FIRST
-                    for (const statement of module.statements) {
-                        if (statement.kind === 'def' || statement.kind === 'let' || statement.kind === 'func') {
-                            this.collectStmt(statement, moduleScope, moduleName);
-                        }
-                    }
-
-                    // PASS 2: Then process imports
-                    for (const statement of module.statements) {
-                        if (statement.kind === 'use') {
-                            this.collectStmt(statement, moduleScope, moduleName);
-                        }
-                    }
-
-                    // PASS 3: Process everything else
-                    for (const statement of module.statements) {
-                        if (statement.kind !== 'def' && statement.kind !== 'let' &&
-                            statement.kind !== 'func' && statement.kind !== 'use') {
-                            this.collectStmt(statement, moduleScope, moduleName);
-                        }
+                    // Simply collect statements in order - pass management happens at program level
+                    for (const statement of module.stmts) {
+                        this.collectStmt(statement, moduleScope, moduleName);
                     }
 
                     return true;
-
                 } catch (error) {
-                    this.reportError( DiagCode.MODULE_NOT_FOUND, `Failed to collect symbols from module '${moduleName}': ${error}` );
+                    this.reportError(DiagCode.MODULE_NOT_FOUND, `Failed to collect symbols from module '${moduleName}': ${error}`);
                     return false;
                 }
             }
@@ -2000,7 +2056,11 @@
             }
 
             private validateSymbolExistsInModule(module: AST.Module, symbolName: string): boolean {
-                for (const stmt of module.statements) {
+                return this.validateSymbolExistsInStmts(module.stmts, symbolName);
+            }
+
+            private validateSymbolExistsInStmts(stmts: AST.StmtNode[], symbolName: string): boolean {
+                for (const stmt of stmts) {
                     if (stmt.kind === 'let') {
                         const varNode = stmt.getLet();
                         if (varNode && varNode.field.ident.name === symbolName) {
@@ -2014,6 +2074,12 @@
                     } else if (stmt.kind === 'def') {
                         const defNode = stmt.getDef();
                         if (defNode && defNode.ident.name === symbolName) {
+                            return true;
+                        }
+                    } else if (stmt.kind === 'section') {
+                        // Sections are just design/organizational - check their contents
+                        const sectionNode = stmt.getSection();
+                        if (sectionNode && this.validateSymbolExistsInStmts(sectionNode.stmts, symbolName)) {
                             return true;
                         }
                     }

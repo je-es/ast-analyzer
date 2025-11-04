@@ -1,5 +1,4 @@
-// ast-analyzer.ts — Multi-phase semantic analyzer with type validation,
-//                   error handling, and LSP support for compilers.
+// ast-analyzer.ts — Traverses the AST to perform static analysis, semantic checks, and error detection.
 //
 // repo   : https://github.com/je-es/ast-analyzer
 // author : https://github.com/maysara-elshewehy
@@ -19,6 +18,7 @@
     import { SymbolResolver }                   from './phases/SymbolResolver';
     import { TypeValidator }                    from './phases/TypeValidator/TypeValidator';
     import { SemanticValidator }                from './phases/SemanticValidator';
+    import { Formatter }                        from './phases/Formatter';
     import { BuiltinConfig }                    from '@je-es/syntax';
 
     // export
@@ -34,37 +34,22 @@
 // ╔════════════════════════════════════════ TYPE ════════════════════════════════════════╗
 
     export interface AnalysisConfig {
-        /** Debug output level */
         debug               ?: DebugKind;
-        /** Stop after specific phase */
         stopAtPhase         ?: AnalysisPhase;
-        /** Enable strict mode (fail fast) */
         strictMode          ?: boolean;
-        /** Maximum number of errors before stopping */
         maxErrors           ?: number;
+        enableFormatting    ?: boolean;
 
         services            : AnalysisServices;
-
         program             : AST.Program;
-
         builtin             : BuiltinConfig;
+        diagnosticFilter    ?: boolean;
     }
 
     export interface AnalysisResult {
-
-        /** Whether analysis succeeded without errors */
         success             : boolean;
-
-        /** All diagnostic messages */
         diagnostics         : Diag.Diagnostic[];
-
-        // /** Analysis performance metrics */
-        // performance?: PerformanceReport;
-
-        /** Phase where analysis stopped */
         completedPhase      ?: AnalysisPhase;
-
-        /** Debug information (if enabled) */
         debugInfo           ?: {
             totalTime: number;
             phaseTimings: Map<AnalysisPhase, number>;
@@ -103,6 +88,7 @@
             symbolResolver      : SymbolResolver;
             typeValidator       : TypeValidator;
             semanticValidator   : SemanticValidator;
+            formatter           : Formatter;
 
             private constructor(config: Partial<AnalysisConfig> = {}) {
                 // Merge with defaults
@@ -113,8 +99,9 @@
                 this.symbolResolver     = new SymbolResolver(this.config);
                 this.typeValidator      = new TypeValidator(this.config);
                 this.semanticValidator  = new SemanticValidator(this.config);
+                this.formatter          = new Formatter(this.config);
 
-                this.log('verbose', `🚀 Analyzer initialized with config: ${JSON.stringify(this.config)}`);
+                this.log('verbose', `🚀 Analyzer initialized with config: ${"..."}`);
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -127,20 +114,19 @@
                 this.log('verbose', '🔍 Starting multi-phase analysis...');
 
                 try {
-                    // Set the program
                     if(new_program !== null) this.config.program = new_program;
 
-                    // Validate program structure
                     if (!this.validateProgramStructure(this.config.program)) {
                         return this.createErrorResult('Invalid program structure', AnalysisPhase.Collection);
                     }
 
                     // Apply runtime config overrides
-                    this.config = { ...this.config, ...config };
+                    if (config) {
+                        this.config = { ...this.config, ...config };
+                    }
 
-                    // Execute phases in order
+                    // Execute analysis phases
                     const phases: Array<{ phase: AnalysisPhase, executor: () => boolean }> = [
-
                         { phase: AnalysisPhase.Collection,          executor: () => this.executePhase1() },
                         { phase: AnalysisPhase.Resolution,          executor: () => this.executePhase2() },
                         { phase: AnalysisPhase.TypeValidation,      executor: () => this.executePhase3() },
@@ -158,37 +144,39 @@
                         const phaseResult = this.runPhase(phase, executor);
                         completedPhase = phase;
 
-                        // Check if we should continue
                         if (!phaseResult.success) {
                             if (this.config.strictMode) {
-                                this.log('errors', `❌ Stopping analysis at phase ${phase} due to errors (strict mode)`);
+                                this.log('errors', `❌ Stopping at phase ${phase} (strict mode)`);
                                 shouldContinue = false;
                             }
                         }
 
-                        // Check error limit
                         if (this.config.services.diagnosticManager.length() >= this.config.maxErrors) {
-                            this.log('errors', `⚠️ Stopping analysis due to error limit (${this.config.maxErrors})`);
+                            this.log('errors', `⚠️ Stopping due to error limit`);
                             shouldContinue = false;
                         }
                     }
 
-                    // Generate final result
+                    // Run formatting phase if enabled and no errors
+                    if (this.config.enableFormatting && !this.config.services.diagnosticManager.hasErrors()) {
+                        this.log('verbose', '📝 Running formatting phase...');
+                        const formatResult = this.runPhase(AnalysisPhase.Formatting, () => this.executePhaseFormat());
+                        if (!formatResult.success) {
+                            this.log('errors', `❌ Formatting phase failed`);
+                            shouldContinue = false;
+                        }
+                    }
+
                     const totalTime = Date.now() - startTime;
                     const result = this.createFinalResult(completedPhase, totalTime);
+
 
                     this.log('verbose',
                         `Analysis completed in ${totalTime}ms\n` +
                         `   Success         : ${result.success}\n` +
                         `   Errors          : ${result.diagnostics.filter(d => d.kind === 'error').length}\n` +
-                        `   Warnings        : ${result.diagnostics.filter(d => d.kind === 'warning').length}\n` +
-                        `   Completed phase : ${completedPhase}`
+                        `   Warnings        : ${result.diagnostics.filter(d => d.kind === 'warning').length}\n`
                     );
-
-                    // if we have errors log it
-                    for (const diagnostic of result.diagnostics) {
-                        this.log('errors', `${diagnostic.kind}: ${diagnostic.msg}`);
-                    }
 
                     return result;
 
@@ -211,6 +199,7 @@
                 this.symbolResolver.reset();
                 this.typeValidator.reset();
                 this.semanticValidator.reset();
+                this.formatter.reset();
             }
 
         // └──────────────────────────────────────────────────────────────────────┘
@@ -236,6 +225,11 @@
             private executePhase4(): boolean {
                 this.log('symbols', 'Phase 4: Semantic Validation');
                 return this.semanticValidator.handle();
+            }
+
+            private executePhaseFormat(): boolean {
+                this.log('symbols', '📝 Phase 5: Code Formatting');
+                return this.formatter.handle();
             }
 
             private runPhase(phase: AnalysisPhase, executor: () => boolean): PhaseResult {
@@ -302,16 +296,6 @@
                     return false;
                 }
 
-                // Validate entry module exists if specified
-                const entryModule = program.metadata?.entryModule as string;
-                if (entryModule && !program.modules.has(entryModule)) {
-                    this.config.services.diagnosticManager.reportError(
-                        Diag.DiagCode.ENTRY_MODULE_NOT_FOUND,
-                        `Entry module '${entryModule}' not found`
-                    );
-                    return false;
-                }
-
                 return true;
             }
 
@@ -337,7 +321,7 @@
             private createServices(config : Partial<AnalysisConfig>): AnalysisServices {
                 const debugManager       = new DebugManager(undefined, config.debug ?? 'off');
                 const contextTracker     = new ContextTracker(debugManager);
-                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config.strictMode ?? false);
+                const diagnosticManager  = new Diag.DiagnosticManager(contextTracker, config.strictMode ?? false, config.diagnosticFilter ?? false);
                 if(config.builtin === undefined) throw new Error('Builtin symbols must be provided');
                 const scopeManager       = new ScopeManager(debugManager);
 
@@ -349,22 +333,26 @@
                     throw new Error("Program must be provided")
                 }
                 const config_without_services : Partial<AnalysisConfig> = {
-                    debug           : config.debug          ?? 'off',
-                    stopAtPhase     : config.stopAtPhase    ?? AnalysisPhase.SemanticValidation,
-                    strictMode      : config.strictMode     ?? false,
-                    maxErrors       : config.maxErrors      ?? 100,
-                    program         : config.program        ?? null,
-                    builtin         : config.builtin        ?? { types: [], functions: [] },
+                    debug               : config.debug              ?? 'off',
+                    stopAtPhase         : config.stopAtPhase        ?? AnalysisPhase.SemanticValidation,
+                    strictMode          : config.strictMode         ?? false,
+                    maxErrors           : config.maxErrors          ?? 100,
+                    enableFormatting    : config.enableFormatting   ?? false,
+                    program             : config.program            ?? null,
+                    builtin             : config.builtin            ?? { types: [], functions: [] },
+                    diagnosticFilter    : config.diagnosticFilter   ?? true
                 };
 
                 return {
-                    debug           : config_without_services.debug!,
-                    stopAtPhase     : config_without_services.stopAtPhase!,
-                    strictMode      : config_without_services.strictMode!,
-                    maxErrors       : config_without_services.maxErrors!,
-                    program         : config_without_services.program!,
-                    builtin         : config_without_services.builtin!,
-                    services        : this.createServices(config_without_services)
+                    debug               : config_without_services.debug!,
+                    stopAtPhase         : config_without_services.stopAtPhase!,
+                    strictMode          : config_without_services.strictMode!,
+                    maxErrors           : config_without_services.maxErrors!,
+                    enableFormatting    : config_without_services.enableFormatting!,
+                    program             : config_without_services.program!,
+                    builtin             : config_without_services.builtin!,
+                    diagnosticFilter    : config_without_services.diagnosticFilter!,
+                    services            : this.createServices(config_without_services)
                 }
             }
 

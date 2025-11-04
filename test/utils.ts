@@ -67,10 +67,9 @@
         const printModuleParserResult : ParseLib.ParseResult = syntax.parse(printModuleInput);
         if(printModuleParserResult.errors.length > 0) console.warn(JSON.stringify(printModuleParserResult, null, 2));
         expect(printModuleParserResult.errors.length).toEqual(0);
-        const printModule = AST.Module.create('print',
-            printModuleParserResult.ast.length > 0 ? printModuleParserResult.ast[0].getCustomData()! as AST.StmtNode[] : [],
-            { path: './src/utils/print.k' }
-        );
+        const printModule = printModuleParserResult.ast[0].getCustomData()! as AST.Module;
+        printModule.metadata.path = './src/utils/print.k';
+        printModule.name = 'print';
 
         // [2.B] Create program with print module
         const program = AST.Program.create([printModule], { entryModule: 'main', path: './' });
@@ -132,10 +131,17 @@
                                 const mainModuleParserResult : ParseLib.ParseResult = syntax.parse(input);
                                 if(mainModuleParserResult.errors.length > 0) console.warn(JSON.stringify(mainModuleParserResult, null, 2));
                                 expect(mainModuleParserResult.errors.length).toEqual(0);
-                                const mainModule = AST.Module.create('main',
-                                    parserResult.ast.length > 0 ? parserResult.ast[0].getCustomData()! as AST.StmtNode[] : [],
-                                    { path: './src/main.k' }
-                                );
+                                const mainModule = parserResult.ast[0]
+                                                 ? parserResult.ast[0].getCustomData()! as AST.Module
+                                                : AST.Module.create('main', [], { path: './src/main.k' }, {
+                                                    name: 'main.k',
+                                                    desc: 'Main module',
+                                                    docs: 'Anonymous',
+                                                    repo: 'Anonymous',
+                                                    footer: 'Made with ❤️ by Maysara.'
+                                                });
+                                mainModule.metadata.path = './src/main.k';
+                                mainModule.name = 'main';
                                 program.modules.set('main', mainModule);
                             }
 

@@ -118,8 +118,61 @@
                     errors: []
                 };
 
+
                 // Check if entry module exists
-                const entryModule = this.config.program!.modules.get(entryModuleName);
+                function getEntryModuleByPathOrName(obj: SemanticValidator) {
+                    // console.log(`[DEBUG] Looking for entry module: '${entryModuleName}'`);
+
+                    // is entryModuleName a path?
+                    if (entryModuleName.includes('/') || entryModuleName.includes('\\')) {
+                        // console.log(`[DEBUG] Entry module appears to be a path, searching by path...`);
+
+                        // Normalize paths for comparison
+                        const normalizePath = (p: string) => {
+                            let normalized = p.replace(/\\/g, '/');
+                            // Remove leading ./ if present
+                            if (normalized.startsWith('./')) {
+                                normalized = normalized.substring(2);
+                            }
+                            return normalized;
+                        };
+                        const normalizedEntry = normalizePath(entryModuleName);
+                        // console.log(`[DEBUG] Normalized entry path: '${normalizedEntry}'`);
+
+                        // loop through each module, check its metadata path
+                        for (const module of obj.config.program!.modules.values()) {
+                            const modulePath = module.metadata?.path as string | undefined;
+                            if (modulePath) {
+                                const normalizedModule = normalizePath(modulePath);
+                                // console.log(`[DEBUG]   Comparing with module path: '${normalizedModule}'`);
+
+                                // Check for exact match or if one ends with the other (relative vs absolute)
+                                if (normalizedModule === normalizedEntry ||
+                                    normalizedModule.endsWith(normalizedEntry) ||
+                                    normalizedEntry.endsWith(normalizedModule)) {
+                                    // console.log(`[DEBUG]   ✓ Match found!`);
+                                    return module;
+                                } else {
+                                    // console.log(`[DEBUG]   ✗ No match`);
+                                }
+                            }
+                        }
+                        // console.log(`[DEBUG] No module found matching path '${entryModuleName}'`);
+                    }
+                    else {
+                        // console.log(`[DEBUG] Entry module is a name, looking up directly: '${entryModuleName}'`);
+                        const module = obj.config.program!.modules.get(entryModuleName);
+                        if (module) {
+                            // console.log(`[DEBUG] ✓ Module found by name`);
+                        } else {
+                            // console.log(`[DEBUG] ✗ Module not found by name`);
+                        }
+                        return module;
+                    }
+                }
+
+
+                const entryModule = getEntryModuleByPathOrName(this);
                 if (!entryModule) {
                     result.errors.push(`Entry module '${entryModuleName}' not found`);
                     return result;
@@ -135,6 +188,7 @@
                 // Look for main function
                 const mainFunc = entryModule.findFunction('main');
                 if (!mainFunc) {
+                    console.log(`[ANALYZER] [MAIN FUNC] Entry module '${entryModuleName}' does not contain 'main' function, ${JSON.stringify(entryModule.stmts, null, 2)}`);
                     result.errors.push(`Entry module '${entryModuleName}' does not contain 'main' function`);
                     return result;
                 }
@@ -368,7 +422,7 @@
                     }
 
                     // Check for empty modules
-                    if (module.statements.length === 0) {
+                    if (module.stmts.length === 0) {
                         this.reportWarning(
                             DiagCode.ANALYSIS_ERROR,
                             `Module '${moduleName}' is empty`
@@ -392,7 +446,7 @@
             private checkCircularImports(moduleName: string, module: AST.Module): void {
                 const importedModules = new Set<string>();
 
-                for (const stmt of module.statements) {
+                for (const stmt of module.stmts) {
                     if (stmt.kind === 'use') {
                         const useNode = stmt.getUse()!;
                         if (useNode.path) {
@@ -423,7 +477,7 @@
                 const module = this.config.program!.modules.get(currentModule);
                 if (!module) return false;
 
-                for (const stmt of module.statements) {
+                for (const stmt of module.stmts) {
                     if (stmt.kind === 'use') {
                         const useNode = stmt.getUse()!;
                         if (useNode.path) {

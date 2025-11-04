@@ -81,7 +81,11 @@
                     const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                     if (!this.init()) return false;
+
+                    this.config.services.debugManager.pause();
                     if (!this.resolveBuiltins(globalScope)) { return false; }
+                    this.config.services.debugManager.resume();
+
                     if (!this.resolveAllModules()) return false;
 
                     this.logStatistics();
@@ -111,7 +115,14 @@
                     this.config.services.scopeManager.setCurrentScope(globalScope.id);
                     this.config.services.contextTracker.setScope(globalScope.id);;
 
-                    this.resetDeclaredFlags(globalScope);
+                    // // Only reset builtin symbols in global scope, not recursively
+                    // for (const [_, symbol] of globalScope.symbols) {
+                    //     if (symbol.kind !== SymbolKind.Use &&
+                    //         symbol.kind !== SymbolKind.Parameter &&
+                    //         symbol.metadata?.isBuiltin) {  // ← Only builtins
+                    //         symbol.declared = false;
+                    //     }
+                    // }
 
                     for (const i in this.config.builtin.types) {
                         this.resolveDefStmt(this.config.builtin.types[i].stmt.getDef()!);
@@ -177,7 +188,7 @@
 
                     this.resetDeclaredFlags(moduleScope);
 
-                    for (const statement of module.statements) {
+                    for (const statement of module.stmts) {
                         this.resolveStmt(statement, moduleScope, moduleName);
                     }
 

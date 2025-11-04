@@ -2,18 +2,18 @@
 <br>
 <div align="center">
     <p>
-        <img src="./assets/img/logo.png" alt="ast-analyzer-Logo" style="" height="50" />
+        <img src="./assets/img/logo.png" alt="ast-analyzer" style="" height="50" />
     </p>
 </div>
 
 
 <div align="center">
     <p align="center" style="font-style:italic; color:gray;">
-        Multi-phase semantic analyzer with advanced type system and error handling.<br>
-        Symbol resolution, type validation, LSP integration, and comptime evaluation for modern compiler frontends.<br>
+        A static analysis tool that traverses the AST<br>
+        to perform semantic checks, validation, scope resolution, and error detection.
         <br>
     </p>
-    <img src="https://img.shields.io/badge/Version-0.0.8-black"/>
+    <img src="https://img.shields.io/badge/Version-0.0.9-black"/>
     <a href="https://github.com/je-es"><img src="https://img.shields.io/badge/Part_of-@je--es-black"/></a>
     <a href="https://github.com/kemet-lang"><img src="https://img.shields.io/badge/Built_for-@kemet--lang-black"/></a>
 </div>
@@ -28,107 +28,92 @@
 
 
 
-<!----------------------------------- HMM ----------------------------------->
+<!----------------------------------- --- ----------------------------------->
 
-## [5] [`@je-es/ast-analyzer`](https://github.com/je-es/ast-analyzer) 🚀
+- ### Install
 
-> _To understand the full context, please refer to [these documents](https://github.com/kemet-lang/.github/blob/main/profile/roadmap/MVP.md)._
+    ```bash
+    npm install @je-es/ast-analyzer
+    ```
 
-```bash
-# install using npm
-npm install @je-es/ast-analyzer
-```
+    ```ts
+    import { Analyzer } from "@je-es/ast-analyzer";
+    ```
 
-```ts
-// import using typescript
-import { Analyzer } from "@je-es/ast-analyzer";
-```
+    <div align="center"> <br> <img src="./assets/img/line.png" alt="line" style="display: block; margin-top:20px;margin-bottom:20px;width:500px;"/> <br> </div>
 
+- ### Usage
 
-> Example:
+    ```rust
+    // suppose we want to analyze the represented AST for this statement:
+    pub let mut x: i32 = 42
+    ```
 
-```rust
-// suppose we want to analyze the represented AST for this statement:
-pub let mut x: i32 = 42
-```
+    ```ts
+    // [1] Create syntax
+    const syntax = Syntax.create({ // :: using @je-es/syntax(parser/lexer)
+            name     : 'Kemet',
+            version  : '0.0.1',
+            lexer    : lexerRules,
+            parser   : parserRules,
+            settings : parserSettings
+        } as syntax.SyntaxConfig
+    );
 
-```ts
-// [1] Create syntax
-const syntax = Syntax.create({ // :: using @je-es/syntax(parser/lexer)
-        name     : 'Kemet',
-        version  : '0.0.1',
-        lexer    : lexerRules,
-        parser   : parserRules,
-        settings : parserSettings
-    } as syntax.SyntaxConfig
-);
+    // [2] Parsing the input
+    const parser_result = syntax.parse('pub let mut x: i32 = 42');
 
-// [2] Parsing the input
-const parser_result = syntax.parse('pub let mut x: i32 = 42');
+    // [3] Create module using the parser result
+    const main_module   = AST.Module.create( // :: using @je-es/ast
+        // Name
+        'main',
 
-// [3] Create module using the parser result
-const main_module   = AST.Module.create( // :: using @je-es/ast
-    // Name
-    'main',
+        // Statements
+        parser_result.ast.length > 0
+            // in my case, first item refers to an array of stmts.
+            ? parser_result.ast[0].getCustomData()! as AST.StmtNode[]
+            // otherwise, empty module.
+            : [],
 
-    // Statements
-    parser_result.ast.length > 0
-        // in my case, first item refers to an array of stmts.
-        ? parser_result.ast[0].getCustomData()! as AST.StmtNode[]
-        // otherwise, empty module.
-        : [],
+        // Metadata
+        { path: './src/main.k' }
+    );
 
-    // Metadata
-    { path: './src/main.k' }
-);
+    // [4] Create program with the created module
+    const program = AST.Program.create([main_module], { entryModule: 'main', path: './' });
 
-// [4] Create program with the created module
-const program = AST.Program.create([main_module], { entryModule: 'main', path: './' });
-
-// [5] Create analyzer for the created program
-const analyzer = Analyzer.create({ debug: 'off' });
-const analyzer_result = analyzer.analyze(program);
-```
+    // [5] Create analyzer for the created program
+    const analyzer = Analyzer.create({ debug: 'off' });
+    const analyzer_result = analyzer.analyze(program);
+    ```
 
 
----
+    <div align="center"> <br> <img src="./assets/img/line.png" alt="line" style="display: block; margin-top:20px;margin-bottom:20px;width:500px;"/> <br> </div>
 
 
-> #### 1. [@je-es/lexer](https://github.com/je-es/lexer)
+- ### Related
 
-> #### 2. [@je-es/parser](https://github.com/je-es/parser)
+    - #### [kemet-lang (MVP)](https://github.com/kemet-lang/.github/blob/main/profile/roadmap/MVP.md)
 
-> #### 3. [@je-es/syntax](https://github.com/je-es/syntax)
+        > #### 1. [@je-es/lexer](https://github.com/je-es/lexer)
 
-> #### 4. [@je-es/ast](https://github.com/je-es/ast)
+        > #### 2. [@je-es/parser](https://github.com/je-es/parser)
 
-> #### 5. [`@je-es/ast-analyzer`](https://github.com/je-es/ast-analyzer)
+        > #### 3. [@je-es/ast](https://github.com/je-es/ast)
 
-> #### 6. [@je-es/project](https://github.com/je-es/project)
+        > #### 4. [@je-es/syntax](https://github.com/je-es/syntax)
 
-> #### 7. [@je-es/lsp](https://github.com/je-es/lsp)
+        > #### 5. [`@je-es/ast-analyzer`](https://github.com/je-es/ast-analyzer)
 
-> #### 8. [@je-es/codegen](https://github.com/je-es/codegen)
+        > #### 6. [@je-es/project](https://github.com/je-es/project)
 
-> #### 9. [@je-es/compiler](https://github.com/je-es/compiler)
+        > #### 7. [@je-es/lsp](https://github.com/je-es/lsp)
 
-<div align="center">
-    <img src="./assets/img/line.png" alt="line" style="display: block; margin-top:20px;margin-bottom:20px;width:500px;"/>
-</div>
+        > #### 8. [@je-es/codegen](https://github.com/je-es/codegen)
 
-<p align="center">
-    <b>
-        <br>
-        <i style="color: gray;">"
-        Currently I'm working on a larger project, so I'll skip writing documentation for now due to time constraints.
-        "</i>
-        <br>
-    </b>
-</p>
+        > #### 9. [@je-es/compiler](https://github.com/je-es/compiler)
 
-<div align="center">
-    <img src="./assets/img/line.png" alt="line" style="display: block; margin-top:20px;margin-bottom:20px;width:500px;"/>
-</div>
+
 
 <!--------------------------------------------------------------------------->
 
@@ -137,6 +122,11 @@ const analyzer_result = analyzer.analyze(program);
 <!----------------------------------- END ----------------------------------->
 
 <br>
+<div align="center">
+    <img src="./assets/img/line.png" alt="line" style="display: block; margin-top:20px;margin-bottom:20px;width:500px;"/>
+</div>
+<br>
+
 <div align="center">
     <a href="https://github.com/maysara-elshewehy">
         <img src="https://img.shields.io/badge/by-Maysara-blue"/>

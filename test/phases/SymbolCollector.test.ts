@@ -17,21 +17,6 @@
     const UseCases = {
 
         UseMustFails: [
-            // MODULE_NOT_FOUND - Invalid relative path
-            {
-                input       : 'use mut_bool_var from "./src/utils/print.k";',
-                success     : false,
-                diagnostics : [
-                    {
-                        kind        : 'error',
-                        msg         : "Module not found in path './src/utils/print.k'",
-                        code        : 'MODULE_NOT_FOUND',
-                        cspan       : { start: 0, end: 44 },
-                        tspan       : { start: 22, end: 43 },
-                    },
-                ],
-            },
-
             // SYMBOL_NOT_FOUND - Symbol doesn't exist in module
             {
                 input       : 'use xxx from "./utils/print.k";',
@@ -100,6 +85,12 @@
         ],
 
         UseMustSucceed: [
+            // Relative path
+            {
+                input       : 'use mut_bool_var from "./src/utils/print.k";',
+                success     : true,
+                diagnostics : [],
+            },
             // Import from external module
             {
                 input       : 'use mut_bool_var from "./utils/print.k"; let y = mut_bool_var; fn f() { let z = mut_bool_var; }',

@@ -9,14 +9,17 @@ declare class IdGenerator {
     current(): number;
 }
 
-type DebugKind = 'off' | 'errors' | 'symbols' | 'scopes' | 'nodes' | 'verbose';
+type DebugKind = 'off' | 'errors' | 'symbols' | 'scopes' | 'nodes' | 'verbose' | 'context';
 declare class DebugManager {
     private debugLevel;
     private indentLevel;
     private contextTracker?;
     private lastMessage;
+    alive: boolean;
     constructor(contextTracker?: ContextTracker, debugLevel?: DebugKind);
     reset(): void;
+    pause(): void;
+    resume(): void;
     log(level: DebugKind, message: string): void;
     increaseIndent(): void;
     decreaseIndent(): void;
@@ -268,7 +271,8 @@ declare enum AnalysisPhase {
     Resolution = "Resolution",
     TypeValidation = "TypeValidation",
     SemanticValidation = "SemanticValidation",
-    FinalValidation = "FinalValidation"
+    FinalValidation = "FinalValidation",
+    Formatting = "Formatting"
 }
 type ContextSymbolKind = 'let' | 'Param' | 'fn' | 'use' | 'def';
 interface SavedContextState {
@@ -490,7 +494,8 @@ declare class DiagnosticManager {
     diagnostics: Diagnostic[];
     private readonly strictMode;
     private contextTracker;
-    constructor(contextTracker: ContextTracker, strictMode?: boolean);
+    private diagnosticFilter;
+    constructor(contextTracker: ContextTracker, strictMode?: boolean, diagnosticFilter?: boolean);
     push(diagnostic: Diagnostic): void;
     reportError(code: DiagCode, msg: string, targetSpan?: Span): void;
     reportWarning(code: DiagCode, msg: string, targetSpan?: Span): void;
@@ -612,6 +617,7 @@ declare class SymbolCollector extends PhaseBase {
     private checkTypeCycle;
     private withTypeContext;
     private validateSymbolExistsInModule;
+    private validateSymbolExistsInStmts;
     private validateMemberPathInModule;
     private init;
     private initStats;
@@ -998,27 +1004,46 @@ declare class SemanticValidator extends PhaseBase {
     logStatistics(): void;
 }
 
+interface FormatterConfig {
+    addMissingDocs: boolean;
+    organizeImports: boolean;
+    createSections: boolean;
+    sortByVisibility: boolean;
+}
+declare class Formatter extends PhaseBase {
+    private stats;
+    private formatterConfig;
+    constructor(config: AnalysisConfig, formatterConfig?: Partial<FormatterConfig>);
+    handle(): boolean;
+    reset(): void;
+    private formatModule;
+    private categorizeStatements;
+    private createSectionedStatements;
+    private createSection;
+    private ensureModuleDocs;
+    private sortImports;
+    private sortByVisibility;
+    private calculateSpan;
+    private init;
+    private initStats;
+    logStatistics(): void;
+}
+
 interface AnalysisConfig {
-    /** Debug output level */
     debug?: DebugKind;
-    /** Stop after specific phase */
     stopAtPhase?: AnalysisPhase;
-    /** Enable strict mode (fail fast) */
     strictMode?: boolean;
-    /** Maximum number of errors before stopping */
     maxErrors?: number;
+    enableFormatting?: boolean;
     services: AnalysisServices;
     program: AST.Program;
     builtin: BuiltinConfig;
+    diagnosticFilter?: boolean;
 }
 interface AnalysisResult {
-    /** Whether analysis succeeded without errors */
     success: boolean;
-    /** All diagnostic messages */
     diagnostics: Diagnostic[];
-    /** Phase where analysis stopped */
     completedPhase?: AnalysisPhase;
-    /** Debug information (if enabled) */
     debugInfo?: {
         totalTime: number;
         phaseTimings: Map<AnalysisPhase, number>;
@@ -1045,6 +1070,7 @@ declare class Analyzer {
     symbolResolver: SymbolResolver;
     typeValidator: TypeValidator;
     semanticValidator: SemanticValidator;
+    formatter: Formatter;
     private constructor();
     analyze(new_program: AST.Program | null, config?: Partial<AnalysisConfig>): AnalysisResult;
     reset(): void;
@@ -1052,6 +1078,7 @@ declare class Analyzer {
     private executePhase2;
     private executePhase3;
     private executePhase4;
+    private executePhaseFormat;
     private runPhase;
     private validateProgramStructure;
     private shouldStopAtPhase;

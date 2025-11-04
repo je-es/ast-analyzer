@@ -174,11 +174,12 @@ var DiagKind = /* @__PURE__ */ ((DiagKind2) => {
   return DiagKind2;
 })(DiagKind || {});
 var DiagnosticManager = class {
-  constructor(contextTracker, strictMode = false) {
+  constructor(contextTracker, strictMode = false, diagnosticFilter = true) {
     // ┌──────────────────────────────── INIT ──────────────────────────────┐
     this.diagnostics = [];
     this.strictMode = strictMode;
     this.contextTracker = contextTracker;
+    this.diagnosticFilter = diagnosticFilter;
   }
   // └────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── MAIN ──────────────────────────────┐
@@ -203,6 +204,7 @@ var DiagnosticManager = class {
     if (this.strictMode && this.diagnostics.length > 0 && diagnostic.kind === "error" /* ERROR */) {
       return;
     }
+    if (diagnostic.sourceModuleName === "global-scope-module") return;
     this.diagnostics.push(diagnostic);
   }
   reportError(code, msg, targetSpan) {
@@ -290,6 +292,7 @@ var DiagnosticManager = class {
     return (priority[d1.kind] || 0) > (priority[d2.kind] || 0);
   }
   filterDuplicates(diagnostics) {
+    if (!this.diagnosticFilter) return diagnostics;
     const seen = /* @__PURE__ */ new Map();
     const filtered = diagnostics.filter(
       (d) => !(d.sourceModuleName === "global-scope-module")
@@ -435,6 +438,7 @@ var AnalysisPhase = /* @__PURE__ */ ((AnalysisPhase2) => {
   AnalysisPhase2["TypeValidation"] = "TypeValidation";
   AnalysisPhase2["SemanticValidation"] = "SemanticValidation";
   AnalysisPhase2["FinalValidation"] = "FinalValidation";
+  AnalysisPhase2["Formatting"] = "Formatting";
   return AnalysisPhase2;
 })(AnalysisPhase || {});
 var ContextTracker = class {
@@ -486,7 +490,7 @@ var ContextTracker = class {
       loopDepth: this.context.loopDepth
     };
     (_a = this.debugManager) == null ? void 0 : _a.log(
-      "verbose",
+      "context",
       `\u{1F4BE} Saved context state: scope=${state.scopeId}, module=${state.moduleName}, spans=${state.spanStackDepth}`
     );
     return state;
@@ -494,7 +498,7 @@ var ContextTracker = class {
   restoreState(state) {
     var _a, _b;
     (_a = this.debugManager) == null ? void 0 : _a.log(
-      "verbose",
+      "context",
       `\u267B\uFE0F  Restoring context state: scope=${state.scopeId}, module=${state.moduleName}`
     );
     if (!this.validateSavedState(state)) {
@@ -547,25 +551,25 @@ var ContextTracker = class {
   setModuleName(moduleName) {
     var _a;
     this.context.currentModuleName = moduleName;
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Set module name to '${moduleName}'`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Set module name to '${moduleName}'`);
   }
   setModulePath(modulePath) {
     var _a;
     this.context.currentModulePath = modulePath;
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Set module path to '${modulePath}'`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Set module path to '${modulePath}'`);
   }
   pushPhase(phase) {
     var _a;
     this.phaseStack.push(this.currentPhase);
     this.setPhase(phase);
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Pushed phase '${phase}' (stack: ${this.phaseStack.length})`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Pushed phase '${phase}' (stack: ${this.phaseStack.length})`);
   }
   popPhase() {
     var _a;
     const previousPhase = this.phaseStack.pop();
     if (previousPhase) {
       this.setPhase(previousPhase);
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Popped phase, returned to '${previousPhase}'`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Popped phase, returned to '${previousPhase}'`);
     }
     return previousPhase;
   }
@@ -573,7 +577,7 @@ var ContextTracker = class {
     var _a;
     this.currentPhase = phase;
     this.context.currentPhase = phase;
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Entered phase '${phase}'`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Entered phase '${phase}'`);
   }
   getCurrentPhase() {
     return this.context.currentPhase;
@@ -587,24 +591,24 @@ var ContextTracker = class {
     var _a, _b;
     if (span) {
       this.context.contextSpanStack.push(span);
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Pushed span [${span.start}-${span.end}] (stack depth: ${this.context.contextSpanStack.length})`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Pushed span [${span.start}-${span.end}] (stack depth: ${this.context.contextSpanStack.length})`);
     } else {
       if (this.context.contextSpanStack.length > 0) {
         const removed = this.context.contextSpanStack.pop();
-        (_b = this.debugManager) == null ? void 0 : _b.log("verbose", `Context: Popped span [${removed == null ? void 0 : removed.start}-${removed == null ? void 0 : removed.end}] (stack depth: ${this.context.contextSpanStack.length})`);
+        (_b = this.debugManager) == null ? void 0 : _b.log("context", `Context: Popped span [${removed == null ? void 0 : removed.start}-${removed == null ? void 0 : removed.end}] (stack depth: ${this.context.contextSpanStack.length})`);
       }
     }
   }
   pushContextSpan(span) {
     var _a;
     this.context.contextSpanStack.push(span);
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Pushed scoped span [${span.start}-${span.end}]`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Pushed scoped span [${span.start}-${span.end}]`);
   }
   popContextSpan() {
     var _a;
     const span = this.context.contextSpanStack.pop();
     if (span) {
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Popped scoped span [${span.start}-${span.end}]`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Popped scoped span [${span.start}-${span.end}]`);
     }
     return span;
   }
@@ -612,7 +616,7 @@ var ContextTracker = class {
     var _a;
     const count = this.context.contextSpanStack.length;
     this.context.contextSpanStack = [];
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Cleared ${count} context spans`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Cleared ${count} context spans`);
   }
   // └────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────── DECLARATION TRACKING ──────────────────────┐
@@ -629,14 +633,14 @@ var ContextTracker = class {
     this.context.declarationStack.push(declaration);
     this.context.processingSymbols.add(symbolId);
     this.pushContextSpan(span);
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Started declaration of ${symbolKind} '${symbolName}' (id: ${symbolId})`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Started declaration of ${symbolKind} '${symbolName}' (id: ${symbolId})`);
   }
   startInitialization(symbolId) {
     var _a;
     const current = this.getCurrentDeclaration();
     if (current && current.symbolId === symbolId) {
       current.phase = "InInitialization" /* InInitialization */;
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Started initialization of symbol '${current.symbolName}' (id: ${symbolId})`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Started initialization of symbol '${current.symbolName}' (id: ${symbolId})`);
     }
   }
   completeDeclaration(symbolId) {
@@ -647,7 +651,7 @@ var ContextTracker = class {
       declaration.phase = "PostDeclaration" /* PostDeclaration */;
       this.context.declarationStack.splice(index, 1);
       this.popContextSpan();
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Completed declaration of '${declaration.symbolName}' (id: ${symbolId})`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Completed declaration of '${declaration.symbolName}' (id: ${symbolId})`);
     }
     this.context.processingSymbols.delete(symbolId);
     this.context.resolvedSymbols.add(symbolId);
@@ -668,13 +672,13 @@ var ContextTracker = class {
   enterExpression(type, span, relatedSymbol) {
     var _a, _b;
     if (!span) {
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", "Warning: Attempted to enter expression context without span");
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", "Warning: Attempted to enter expression context without span");
       return;
     }
     const depth = this.context.expressionStack.length;
     this.context.expressionStack.push({ type, relatedSymbol, depth, span });
     this.pushContextSpan(span);
-    (_b = this.debugManager) == null ? void 0 : _b.log("verbose", `Context: Entered expression ${type} at depth ${depth}`);
+    (_b = this.debugManager) == null ? void 0 : _b.log("context", `Context: Entered expression ${type} at depth ${depth}`);
   }
   exitExpression() {
     var _a;
@@ -684,7 +688,7 @@ var ContextTracker = class {
     const exited = this.context.expressionStack.pop();
     this.popContextSpan();
     if (exited) {
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Exited expression ${exited.type} from depth ${exited.depth}`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Exited expression ${exited.type} from depth ${exited.depth}`);
     }
     return exited;
   }
@@ -746,13 +750,13 @@ var ContextTracker = class {
   enterLoop() {
     var _a;
     this.context.loopDepth++;
-    (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Entered loop (depth: ${this.context.loopDepth})`);
+    (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Entered loop (depth: ${this.context.loopDepth})`);
   }
   exitLoop() {
     var _a, _b;
     if (this.context.loopDepth > 0) {
       this.context.loopDepth--;
-      (_a = this.debugManager) == null ? void 0 : _a.log("verbose", `Context: Exited loop (depth: ${this.context.loopDepth})`);
+      (_a = this.debugManager) == null ? void 0 : _a.log("context", `Context: Exited loop (depth: ${this.context.loopDepth})`);
     } else {
       (_b = this.debugManager) == null ? void 0 : _b.log("errors", `Context: Attempted to exit loop when not in any loop`);
     }
@@ -878,6 +882,7 @@ var DebugManager = class {
     this.debugLevel = "off";
     this.indentLevel = 0;
     this.lastMessage = "";
+    this.alive = true;
     this.debugLevel = debugLevel;
     this.contextTracker = contextTracker;
   }
@@ -886,8 +891,14 @@ var DebugManager = class {
   }
   // └────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── MAIN ──────────────────────────────┐
+  pause() {
+    this.alive = false;
+  }
+  resume() {
+    this.alive = true;
+  }
   log(level, message) {
-    if (this.debugLevel === "off") {
+    if (this.debugLevel === "off" || !this.alive) {
       return;
     }
     const levels = ["off", "errors", "symbols", "scopes", "nodes", "verbose"];
@@ -1613,28 +1624,70 @@ var path = __toESM(require("path"));
 function resolveModulePath(program, importPath, currentModulePath) {
   var _a;
   const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
-  if (importPath.startsWith(".") && currentModulePath) {
+  let normalizedImport = importPath;
+  if (!normalizedImport.endsWith(".k")) {
+    normalizedImport = normalizedImport + ".k";
+  }
+  if (normalizedImport.startsWith(".") && currentModulePath) {
     const currentDir = path.dirname(currentModulePath);
-    const resolved = path.resolve(currentDir, importPath);
+    const resolved = path.resolve(currentDir, normalizedImport);
     return path.relative(programRoot, resolved);
   }
-  if (path.isAbsolute(importPath)) {
-    return path.relative(programRoot, importPath);
+  if (!normalizedImport.startsWith(".")) {
+    normalizedImport = "./" + normalizedImport;
   }
-  return path.normalize(importPath);
+  if (path.isAbsolute(normalizedImport)) {
+    return path.relative(programRoot, normalizedImport);
+  }
+  if (currentModulePath) {
+    const currentDir = path.dirname(currentModulePath);
+    return path.relative(programRoot, path.resolve(currentDir, normalizedImport));
+  }
+  return path.normalize(normalizedImport);
 }
 function findModuleByPath(program, targetPath) {
   var _a, _b;
   const programRoot = ((_a = program.metadata) == null ? void 0 : _a.path) || "./";
-  const normalizedTarget = path.normalize(targetPath);
+  const generateVariations = (p) => {
+    const normalized = path.normalize(p).replace(/\\/g, "/");
+    const variations = /* @__PURE__ */ new Set();
+    variations.add(normalized);
+    if (normalized.endsWith(".k")) {
+      variations.add(normalized.slice(0, -2));
+    } else {
+      variations.add(normalized + ".k");
+    }
+    if (normalized.startsWith("./")) {
+      const withoutPrefix = normalized.substring(2);
+      variations.add(withoutPrefix);
+      if (withoutPrefix.endsWith(".k")) {
+        variations.add(withoutPrefix.slice(0, -2));
+      } else {
+        variations.add(withoutPrefix + ".k");
+      }
+    } else {
+      variations.add("./" + normalized);
+      if (normalized.endsWith(".k")) {
+        variations.add("./" + normalized.slice(0, -2));
+      } else {
+        variations.add("./" + normalized + ".k");
+      }
+    }
+    return Array.from(variations);
+  };
+  const targetVariations = generateVariations(targetPath);
   for (const [_, module2] of program.modules) {
     const modulePath = (_b = module2.metadata) == null ? void 0 : _b.path;
     if (!modulePath) continue;
     const relativeModulePath = path.relative(programRoot, modulePath);
-    const normalizedModulePath = path.normalize(modulePath);
-    const normalizedRelativePath = path.normalize(relativeModulePath);
-    if (normalizedModulePath === normalizedTarget || normalizedRelativePath === normalizedTarget || modulePath === targetPath || relativeModulePath === targetPath) {
-      return module2;
+    const moduleVariations = generateVariations(modulePath);
+    moduleVariations.push(...generateVariations(relativeModulePath));
+    for (const targetVar of targetVariations) {
+      for (const moduleVar of moduleVariations) {
+        if (targetVar === moduleVar || moduleVar.endsWith(targetVar) || targetVar.endsWith(moduleVar)) {
+          return module2;
+        }
+      }
     }
   }
   return void 0;
@@ -1778,12 +1831,11 @@ var SymbolCollector = class extends PhaseBase {
       if (!this.buildPathMappings()) {
         return false;
       }
+      this.config.services.debugManager.pause();
       if (!this.collectBuiltins(globalScope)) {
         return false;
       }
-      {
-        const symbols = this.config.services.scopeManager.getScope(globalScope.id).symbols;
-      }
+      this.config.services.debugManager.resume();
       if (!this.collectAllModules()) {
         return false;
       }
@@ -1843,17 +1895,88 @@ var SymbolCollector = class extends PhaseBase {
     return true;
   }
   collectAllModules() {
+    var _a, _b;
     this.log("verbose", "Collecting symbols from all modules...");
     const globalScope = this.config.services.scopeManager.getCurrentScope();
     for (const [moduleName, module2] of this.config.program.modules) {
       this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
       try {
-        if (!this.collectModule(moduleName, module2, globalScope)) {
-          if (this.config.services.contextTracker.getCurrentPhase() === "Collection" /* Collection */) {
-            this.log("errors", `Failed to collect from module ${moduleName}, continuing...`);
+        this.config.services.contextTracker.setModuleName(moduleName);
+        const modulePath = (_a = module2.metadata) == null ? void 0 : _a.path;
+        if (modulePath) {
+          this.config.services.contextTracker.setModulePath(modulePath);
+          this.pathContext.currentModulePath = modulePath;
+        }
+        const moduleScope = this.createModuleScope(moduleName, globalScope);
+        for (const statement of module2.stmts) {
+          if (statement.kind === "def" || statement.kind === "let" || statement.kind === "func") {
+            this.collectStmt(statement, moduleScope, moduleName);
+          } else if (statement.kind === "section") {
+            const sectionNode = statement.getSection();
+            if (sectionNode) {
+              for (const sectionStmt of sectionNode.stmts) {
+                if (sectionStmt.kind === "def" || sectionStmt.kind === "let" || sectionStmt.kind === "func") {
+                  this.collectStmt(sectionStmt, moduleScope, moduleName);
+                }
+              }
+            }
           }
         }
         this.stats.modulesProcessed++;
+      } finally {
+        this.config.services.contextTracker.popContextSpan();
+      }
+    }
+    for (const [moduleName, module2] of this.config.program.modules) {
+      this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
+      try {
+        this.config.services.contextTracker.setModuleName(moduleName);
+        const modulePath = (_b = module2.metadata) == null ? void 0 : _b.path;
+        if (modulePath) {
+          this.config.services.contextTracker.setModulePath(modulePath);
+        }
+        const moduleScope = this.config.services.scopeManager.findScopeByName(moduleName, "Module" /* Module */);
+        if (!moduleScope) {
+          this.log("errors", `Module scope for '${moduleName}' not found`);
+          continue;
+        }
+        for (const statement of module2.stmts) {
+          if (statement.kind === "use") {
+            this.collectStmt(statement, moduleScope, moduleName);
+          } else if (statement.kind === "section") {
+            const sectionNode = statement.getSection();
+            if (sectionNode) {
+              for (const sectionStmt of sectionNode.stmts) {
+                if (sectionStmt.kind === "use") {
+                  this.collectStmt(sectionStmt, moduleScope, moduleName);
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        this.config.services.contextTracker.popContextSpan();
+      }
+    }
+    for (const [moduleName, module2] of this.config.program.modules) {
+      this.config.services.contextTracker.pushContextSpan({ start: 0, end: 0 });
+      try {
+        const moduleScope = this.config.services.scopeManager.findScopeByName(moduleName, "Module" /* Module */);
+        if (!moduleScope) continue;
+        for (const statement of module2.stmts) {
+          if (statement.kind === "section") {
+            const sectionNode = statement.getSection();
+            if (sectionNode) {
+              for (const sectionStmt of sectionNode.stmts) {
+                if (sectionStmt.kind !== "def" && sectionStmt.kind !== "let" && sectionStmt.kind !== "func" && sectionStmt.kind !== "use") {
+                  this.collectStmt(sectionStmt, moduleScope, moduleName);
+                }
+              }
+            }
+          } else if (statement.kind !== "def" && statement.kind !== "let" && statement.kind !== "func" && statement.kind !== "use") {
+            this.collectStmt(statement, moduleScope, moduleName);
+          }
+        }
       } finally {
         this.config.services.contextTracker.popContextSpan();
       }
@@ -1897,29 +2020,15 @@ var SymbolCollector = class extends PhaseBase {
   collectModule(moduleName, module2, parentScope) {
     var _a;
     this.log("symbols", `Collecting from module '${moduleName}'`);
-    this.typeContext = this.initTypeContext();
     try {
       this.config.services.contextTracker.setModuleName(moduleName);
-      const modulePath = (_a = module2.metadata) == null ? void 0 : _a.path;
-      if (modulePath) {
-        this.config.services.contextTracker.setModulePath(modulePath);
-        this.pathContext.currentModulePath = modulePath;
+      if (typeof ((_a = module2.metadata) == null ? void 0 : _a.path) === "string") {
+        this.config.services.contextTracker.setModulePath(module2.metadata.path);
+        this.pathContext.currentModulePath = module2.metadata.path;
       }
       const moduleScope = this.createModuleScope(moduleName, parentScope);
-      for (const statement of module2.statements) {
-        if (statement.kind === "def" || statement.kind === "let" || statement.kind === "func") {
-          this.collectStmt(statement, moduleScope, moduleName);
-        }
-      }
-      for (const statement of module2.statements) {
-        if (statement.kind === "use") {
-          this.collectStmt(statement, moduleScope, moduleName);
-        }
-      }
-      for (const statement of module2.statements) {
-        if (statement.kind !== "def" && statement.kind !== "let" && statement.kind !== "func" && statement.kind !== "use") {
-          this.collectStmt(statement, moduleScope, moduleName);
-        }
+      for (const statement of module2.stmts) {
+        this.collectStmt(statement, moduleScope, moduleName);
       }
       return true;
     } catch (error) {
@@ -3227,7 +3336,10 @@ var SymbolCollector = class extends PhaseBase {
     }
   }
   validateSymbolExistsInModule(module2, symbolName) {
-    for (const stmt of module2.statements) {
+    return this.validateSymbolExistsInStmts(module2.stmts, symbolName);
+  }
+  validateSymbolExistsInStmts(stmts, symbolName) {
+    for (const stmt of stmts) {
       if (stmt.kind === "let") {
         const varNode = stmt.getLet();
         if (varNode && varNode.field.ident.name === symbolName) {
@@ -3241,6 +3353,11 @@ var SymbolCollector = class extends PhaseBase {
       } else if (stmt.kind === "def") {
         const defNode = stmt.getDef();
         if (defNode && defNode.ident.name === symbolName) {
+          return true;
+        }
+      } else if (stmt.kind === "section") {
+        const sectionNode = stmt.getSection();
+        if (sectionNode && this.validateSymbolExistsInStmts(sectionNode.stmts, symbolName)) {
           return true;
         }
       }
@@ -3403,9 +3520,11 @@ var SymbolResolver = class extends PhaseBase {
       this.stats.startTime = Date.now();
       const globalScope = this.config.services.scopeManager.getCurrentScope();
       if (!this.init()) return false;
+      this.config.services.debugManager.pause();
       if (!this.resolveBuiltins(globalScope)) {
         return false;
       }
+      this.config.services.debugManager.resume();
       if (!this.resolveAllModules()) return false;
       this.logStatistics();
       return !this.config.services.diagnosticManager.hasErrors();
@@ -3427,7 +3546,6 @@ var SymbolResolver = class extends PhaseBase {
       this.config.services.scopeManager.setCurrentScope(globalScope.id);
       this.config.services.contextTracker.setScope(globalScope.id);
       ;
-      this.resetDeclaredFlags(globalScope);
       for (const i in this.config.builtin.types) {
         this.resolveDefStmt(this.config.builtin.types[i].stmt.getDef());
       }
@@ -3477,7 +3595,7 @@ var SymbolResolver = class extends PhaseBase {
       this.config.services.contextTracker.setScope(moduleScope.id);
       ;
       this.resetDeclaredFlags(moduleScope);
-      for (const statement of module2.statements) {
+      for (const statement of module2.stmts) {
         this.resolveStmt(statement, moduleScope, moduleName);
       }
       this.exitModuleContext();
@@ -8794,9 +8912,11 @@ var TypeValidator = class extends PhaseBase {
       this.stats.startTime = Date.now();
       const globalScope = this.config.services.scopeManager.getCurrentScope();
       if (!this.init()) return false;
+      this.config.services.debugManager.pause();
       if (!this.validateBuiltins(globalScope)) {
         return false;
       }
+      this.config.services.debugManager.resume();
       if (!this.validateAllModules()) return false;
       this.logStatistics();
       return !this.config.services.diagnosticManager.hasErrors();
@@ -8865,7 +8985,7 @@ var TypeValidator = class extends PhaseBase {
       }
       this.config.services.scopeManager.setCurrentScope(moduleScope.id);
       this.config.services.contextTracker.setScope(moduleScope.id);
-      for (const statement of module2.statements) {
+      for (const statement of module2.stmts) {
         this.validateStmt(statement, moduleScope, moduleName);
       }
       this.exitModuleContext();
@@ -11216,7 +11336,36 @@ var SemanticValidator = class extends PhaseBase {
       mainIsPublic: false,
       errors: []
     };
-    const entryModule = this.config.program.modules.get(entryModuleName);
+    function getEntryModuleByPathOrName(obj) {
+      var _a2;
+      if (entryModuleName.includes("/") || entryModuleName.includes("\\")) {
+        const normalizePath2 = (p) => {
+          let normalized = p.replace(/\\/g, "/");
+          if (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+          }
+          return normalized;
+        };
+        const normalizedEntry = normalizePath2(entryModuleName);
+        for (const module2 of obj.config.program.modules.values()) {
+          const modulePath = (_a2 = module2.metadata) == null ? void 0 : _a2.path;
+          if (modulePath) {
+            const normalizedModule = normalizePath2(modulePath);
+            if (normalizedModule === normalizedEntry || normalizedModule.endsWith(normalizedEntry) || normalizedEntry.endsWith(normalizedModule)) {
+              return module2;
+            } else {
+            }
+          }
+        }
+      } else {
+        const module2 = obj.config.program.modules.get(entryModuleName);
+        if (module2) {
+        } else {
+        }
+        return module2;
+      }
+    }
+    const entryModule = getEntryModuleByPathOrName(this);
     if (!entryModule) {
       result.errors.push(`Entry module '${entryModuleName}' not found`);
       return result;
@@ -11228,6 +11377,7 @@ var SemanticValidator = class extends PhaseBase {
     }
     const mainFunc = entryModule.findFunction("main");
     if (!mainFunc) {
+      console.log(`[ANALYZER] [MAIN FUNC] Entry module '${entryModuleName}' does not contain 'main' function, ${JSON.stringify(entryModule.stmts, null, 2)}`);
       result.errors.push(`Entry module '${entryModuleName}' does not contain 'main' function`);
       return result;
     }
@@ -11396,7 +11546,7 @@ var SemanticValidator = class extends PhaseBase {
       if (moduleSpan && typeof moduleSpan === "object" && "start" in moduleSpan && "end" in moduleSpan) {
         this.config.services.contextTracker.setCurrentContextSpan(moduleSpan);
       }
-      if (module2.statements.length === 0) {
+      if (module2.stmts.length === 0) {
         this.reportWarning(
           "ANALYSIS_ERROR" /* ANALYSIS_ERROR */,
           `Module '${moduleName}' is empty`
@@ -11413,7 +11563,7 @@ var SemanticValidator = class extends PhaseBase {
   }
   checkCircularImports(moduleName, module2) {
     const importedModules = /* @__PURE__ */ new Set();
-    for (const stmt of module2.statements) {
+    for (const stmt of module2.stmts) {
       if (stmt.kind === "use") {
         const useNode = stmt.getUse();
         if (useNode.path) {
@@ -11439,7 +11589,7 @@ var SemanticValidator = class extends PhaseBase {
     visited.add(currentModule);
     const module2 = this.config.program.modules.get(currentModule);
     if (!module2) return false;
-    for (const stmt of module2.statements) {
+    for (const stmt of module2.stmts) {
       if (stmt.kind === "use") {
         const useNode = stmt.getUse();
         if (useNode.path) {
@@ -11536,6 +11686,256 @@ var SemanticValidator = class extends PhaseBase {
   // └──────────────────────────────────────────────────────────────────────┘
 };
 
+// lib/phases/Formatter.ts
+var AST5 = __toESM(require("@je-es/ast"));
+var Formatter = class extends PhaseBase {
+  constructor(config, formatterConfig) {
+    var _a, _b, _c, _d;
+    super("Formatting" /* Formatting */, config);
+    // ┌──────────────────────────────── INIT ────────────────────────────────┐
+    this.stats = this.initStats();
+    this.formatterConfig = {
+      addMissingDocs: (_a = formatterConfig == null ? void 0 : formatterConfig.addMissingDocs) != null ? _a : true,
+      organizeImports: (_b = formatterConfig == null ? void 0 : formatterConfig.organizeImports) != null ? _b : true,
+      createSections: (_c = formatterConfig == null ? void 0 : formatterConfig.createSections) != null ? _c : true,
+      sortByVisibility: (_d = formatterConfig == null ? void 0 : formatterConfig.sortByVisibility) != null ? _d : true
+    };
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── MAIN ────────────────────────────────┐
+  handle() {
+    try {
+      this.log("verbose", "Starting formatter phase...");
+      this.stats.startTime = Date.now();
+      this.init();
+      for (const [moduleName, module2] of this.config.program.modules) {
+        this.log("verbose", `Formatting module '${moduleName}'`);
+        this.formatModule(moduleName, module2);
+        this.stats.modulesFormatted++;
+      }
+      this.logStatistics();
+      return true;
+    } catch (error) {
+      this.log("errors", `Fatal error during formatting: ${error}`);
+      return false;
+    }
+  }
+  reset() {
+    this.stats = this.initStats();
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── FORMAT ──────────────────────────────┐
+  formatModule(moduleName, module2) {
+    this.log("verbose", `Formatting module '${moduleName}'`);
+    if (this.formatterConfig.addMissingDocs) {
+      this.ensureModuleDocs(module2);
+    }
+    const categorized = this.categorizeStatements(module2.stmts);
+    if (this.formatterConfig.organizeImports) {
+      this.sortImports(categorized.pack);
+    }
+    if (this.formatterConfig.sortByVisibility) {
+      this.sortByVisibility(categorized.main);
+      this.sortByVisibility(categorized.help);
+    }
+    if (this.formatterConfig.createSections) {
+      module2.stmts = this.createSectionedStatements(categorized, moduleName);
+    } else {
+      module2.stmts = [
+        ...categorized.pack,
+        ...categorized.type,
+        ...categorized.init,
+        ...categorized.main,
+        ...categorized.help,
+        ...categorized.other
+      ];
+    }
+    this.stats.statementsReorganized += module2.stmts.length;
+  }
+  categorizeStatements(statements) {
+    const categorized = {
+      pack: [],
+      type: [],
+      init: [],
+      main: [],
+      help: [],
+      other: []
+    };
+    for (const stmt of statements) {
+      if (stmt.kind === "section") {
+        categorized.other.push(stmt);
+        continue;
+      }
+      switch (stmt.kind) {
+        case "use":
+          categorized.pack.push(stmt);
+          break;
+        case "def":
+          categorized.type.push(stmt);
+          break;
+        case "let":
+          categorized.init.push(stmt);
+          break;
+        case "func":
+          const funcNode = stmt.getFunc();
+          if (funcNode.visibility.kind === "Public") {
+            categorized.main.push(stmt);
+          } else {
+            categorized.help.push(stmt);
+          }
+          break;
+        default:
+          categorized.other.push(stmt);
+          break;
+      }
+    }
+    return categorized;
+  }
+  createSectionedStatements(categorized, moduleName) {
+    const sections = [];
+    if (categorized.pack.length > 0) {
+      sections.push(this.createSection("PACK", categorized.pack));
+      this.stats.sectionsCreated++;
+    }
+    if (categorized.type.length > 0) {
+      sections.push(this.createSection("TYPE", categorized.type));
+      this.stats.sectionsCreated++;
+    }
+    if (categorized.init.length > 0) {
+      sections.push(this.createSection("INIT", categorized.init));
+      this.stats.sectionsCreated++;
+    }
+    if (categorized.main.length > 0) {
+      sections.push(this.createSection("MAIN", categorized.main));
+      this.stats.sectionsCreated++;
+    }
+    if (categorized.help.length > 0) {
+      sections.push(this.createSection("HELP", categorized.help));
+      this.stats.sectionsCreated++;
+    }
+    sections.push(...categorized.other);
+    return sections;
+  }
+  createSection(name, stmts) {
+    const section = AST5.StmtNode.asSection(
+      this.calculateSpan(stmts),
+      { name, span: { start: 0, end: 0 } },
+      0,
+      // TODO
+      stmts
+    );
+    return section;
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── HELPERS ─────────────────────────────┐
+  ensureModuleDocs(module2) {
+    if (!module2.docs) {
+      module2.docs = {
+        name: "???",
+        desc: "No description provided",
+        repo: "???",
+        docs: "???",
+        footer: "Made with \u2764\uFE0F by Maysara."
+      };
+      this.stats.docsAdded++;
+      return;
+    }
+    let modified = false;
+    if (!module2.docs.name || module2.docs.name === "") {
+      module2.docs.name = "???";
+      modified = true;
+    }
+    if (!module2.docs.desc || module2.docs.desc === "") {
+      module2.docs.desc = "No description provided";
+      modified = true;
+    }
+    if (!module2.docs.repo || module2.docs.repo === "") {
+      module2.docs.repo = "???";
+      modified = true;
+    }
+    if (!module2.docs.docs || module2.docs.docs === "") {
+      module2.docs.docs = "???";
+      modified = true;
+    }
+    if (!module2.docs.footer || module2.docs.footer === "") {
+      module2.docs.footer = "Made with \u2764\uFE0F by Maysara.";
+      modified = true;
+    }
+    if (modified) {
+      this.stats.docsAdded++;
+    }
+  }
+  sortImports(imports) {
+    imports.sort((a, b) => {
+      var _a, _b, _c, _d, _e, _f;
+      const useA = a.getUse();
+      const useB = b.getUse();
+      const pathA = useA.path || "";
+      const pathB = useB.path || "";
+      if (pathA !== pathB) {
+        return pathA.localeCompare(pathB);
+      }
+      const nameA = ((_a = useA.alias) == null ? void 0 : _a.name) || ((_c = (_b = useA.targetArr) == null ? void 0 : _b[0]) == null ? void 0 : _c.name) || "";
+      const nameB = ((_d = useB.alias) == null ? void 0 : _d.name) || ((_f = (_e = useB.targetArr) == null ? void 0 : _e[0]) == null ? void 0 : _f.name) || "";
+      return nameA.localeCompare(nameB);
+    });
+  }
+  sortByVisibility(functions) {
+    functions.sort((a, b) => {
+      const funcA = a.getFunc();
+      const funcB = b.getFunc();
+      const visA = funcA.visibility.kind === "Public" ? 0 : 1;
+      const visB = funcB.visibility.kind === "Public" ? 0 : 1;
+      if (visA !== visB) {
+        return visA - visB;
+      }
+      return funcA.ident.name.localeCompare(funcB.ident.name);
+    });
+  }
+  calculateSpan(stmts) {
+    if (stmts.length === 0) {
+      return { start: 0, end: 0 };
+    }
+    const first = stmts[0].span;
+    const last = stmts[stmts.length - 1].span;
+    return {
+      start: first.start,
+      end: last.end
+    };
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── INIT ────────────────────────────────┐
+  init() {
+    this.config.services.contextTracker.reset();
+    this.config.services.contextTracker.setPhase("Formatting" /* Formatting */);
+    this.log("verbose", "Formatter initialized");
+  }
+  initStats() {
+    return {
+      modulesFormatted: 0,
+      sectionsCreated: 0,
+      statementsReorganized: 0,
+      docsAdded: 0,
+      startTime: Date.now()
+    };
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+  // ┌──────────────────────────────── STATS ───────────────────────────────┐
+  logStatistics() {
+    const duration = Date.now() - this.stats.startTime;
+    this.log(
+      "verbose",
+      `Formatter Statistics:
+  Duration                 : ${duration}ms
+  Modules formatted        : ${this.stats.modulesFormatted}
+  Sections created         : ${this.stats.sectionsCreated}
+  Statements reorganized   : ${this.stats.statementsReorganized}
+  Docs added               : ${this.stats.docsAdded}`
+    );
+  }
+  // └──────────────────────────────────────────────────────────────────────┘
+};
+
 // lib/ast-analyzer.ts
 var _Analyzer = class _Analyzer {
   constructor(config = {}) {
@@ -11546,7 +11946,8 @@ var _Analyzer = class _Analyzer {
     this.symbolResolver = new SymbolResolver(this.config);
     this.typeValidator = new TypeValidator(this.config);
     this.semanticValidator = new SemanticValidator(this.config);
-    this.log("verbose", `\u{1F680} Analyzer initialized with config: ${JSON.stringify(this.config)}`);
+    this.formatter = new Formatter(this.config);
+    this.log("verbose", `\u{1F680} Analyzer initialized with config: ${"..."}`);
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── MAIN ────────────────────────────────┐
@@ -11558,7 +11959,9 @@ var _Analyzer = class _Analyzer {
       if (!this.validateProgramStructure(this.config.program)) {
         return this.createErrorResult("Invalid program structure", "Collection" /* Collection */);
       }
-      this.config = __spreadValues(__spreadValues({}, this.config), config);
+      if (config) {
+        this.config = __spreadValues(__spreadValues({}, this.config), config);
+      }
       const phases = [
         { phase: "Collection" /* Collection */, executor: () => this.executePhase1() },
         { phase: "Resolution" /* Resolution */, executor: () => this.executePhase2() },
@@ -11575,12 +11978,20 @@ var _Analyzer = class _Analyzer {
         completedPhase = phase;
         if (!phaseResult.success) {
           if (this.config.strictMode) {
-            this.log("errors", `\u274C Stopping analysis at phase ${phase} due to errors (strict mode)`);
+            this.log("errors", `\u274C Stopping at phase ${phase} (strict mode)`);
             shouldContinue = false;
           }
         }
         if (this.config.services.diagnosticManager.length() >= this.config.maxErrors) {
-          this.log("errors", `\u26A0\uFE0F Stopping analysis due to error limit (${this.config.maxErrors})`);
+          this.log("errors", `\u26A0\uFE0F Stopping due to error limit`);
+          shouldContinue = false;
+        }
+      }
+      if (this.config.enableFormatting && !this.config.services.diagnosticManager.hasErrors()) {
+        this.log("verbose", "\u{1F4DD} Running formatting phase...");
+        const formatResult = this.runPhase("Formatting" /* Formatting */, () => this.executePhaseFormat());
+        if (!formatResult.success) {
+          this.log("errors", `\u274C Formatting phase failed`);
           shouldContinue = false;
         }
       }
@@ -11592,11 +12003,8 @@ var _Analyzer = class _Analyzer {
    Success         : ${result.success}
    Errors          : ${result.diagnostics.filter((d) => d.kind === "error").length}
    Warnings        : ${result.diagnostics.filter((d) => d.kind === "warning").length}
-   Completed phase : ${completedPhase}`
+`
       );
-      for (const diagnostic of result.diagnostics) {
-        this.log("errors", `${diagnostic.kind}: ${diagnostic.msg}`);
-      }
       return result;
     } catch (error) {
       this.log("errors", `\u{1F4A5} Fatal analysis error: ${error}`);
@@ -11614,6 +12022,7 @@ var _Analyzer = class _Analyzer {
     this.symbolResolver.reset();
     this.typeValidator.reset();
     this.semanticValidator.reset();
+    this.formatter.reset();
   }
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
@@ -11632,6 +12041,10 @@ var _Analyzer = class _Analyzer {
   executePhase4() {
     this.log("symbols", "Phase 4: Semantic Validation");
     return this.semanticValidator.handle();
+  }
+  executePhaseFormat() {
+    this.log("symbols", "\u{1F4DD} Phase 5: Code Formatting");
+    return this.formatter.handle();
   }
   runPhase(phase, executor) {
     const startTime = Date.now();
@@ -11667,7 +12080,6 @@ var _Analyzer = class _Analyzer {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
   validateProgramStructure(program) {
-    var _a;
     if (!program) {
       this.config.services.diagnosticManager.reportError(
         "INTERNAL_ERROR" /* INTERNAL_ERROR */,
@@ -11679,14 +12091,6 @@ var _Analyzer = class _Analyzer {
       this.config.services.diagnosticManager.reportError(
         "MODULE_NOT_FOUND" /* MODULE_NOT_FOUND */,
         "Program contains no modules"
-      );
-      return false;
-    }
-    const entryModule = (_a = program.metadata) == null ? void 0 : _a.entryModule;
-    if (entryModule && !program.modules.has(entryModule)) {
-      this.config.services.diagnosticManager.reportError(
-        "ENTRY_MODULE_NOT_FOUND" /* ENTRY_MODULE_NOT_FOUND */,
-        `Entry module '${entryModule}' not found`
       );
       return false;
     }
@@ -11706,16 +12110,16 @@ var _Analyzer = class _Analyzer {
   // └──────────────────────────────────────────────────────────────────────┘
   // ┌──────────────────────────────── ---- ────────────────────────────────┐
   createServices(config) {
-    var _a, _b;
+    var _a, _b, _c;
     const debugManager = new DebugManager(void 0, (_a = config.debug) != null ? _a : "off");
     const contextTracker = new ContextTracker(debugManager);
-    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config.strictMode) != null ? _b : false);
+    const diagnosticManager = new DiagnosticManager(contextTracker, (_b = config.strictMode) != null ? _b : false, (_c = config.diagnosticFilter) != null ? _c : false);
     if (config.builtin === void 0) throw new Error("Builtin symbols must be provided");
     const scopeManager = new ScopeManager(debugManager);
     return { debugManager, contextTracker, diagnosticManager, scopeManager };
   }
   createConfig(config) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     if (!config.program) {
       throw new Error("Program must be provided");
     }
@@ -11724,16 +12128,20 @@ var _Analyzer = class _Analyzer {
       stopAtPhase: (_b = config.stopAtPhase) != null ? _b : "SemanticValidation" /* SemanticValidation */,
       strictMode: (_c = config.strictMode) != null ? _c : false,
       maxErrors: (_d = config.maxErrors) != null ? _d : 100,
-      program: (_e = config.program) != null ? _e : null,
-      builtin: (_f = config.builtin) != null ? _f : { types: [], functions: [] }
+      enableFormatting: (_e = config.enableFormatting) != null ? _e : false,
+      program: (_f = config.program) != null ? _f : null,
+      builtin: (_g = config.builtin) != null ? _g : { types: [], functions: [] },
+      diagnosticFilter: (_h = config.diagnosticFilter) != null ? _h : true
     };
     return {
       debug: config_without_services.debug,
       stopAtPhase: config_without_services.stopAtPhase,
       strictMode: config_without_services.strictMode,
       maxErrors: config_without_services.maxErrors,
+      enableFormatting: config_without_services.enableFormatting,
       program: config_without_services.program,
       builtin: config_without_services.builtin,
+      diagnosticFilter: config_without_services.diagnosticFilter,
       services: this.createServices(config_without_services)
     };
   }

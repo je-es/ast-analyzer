@@ -1,7 +1,7 @@
 {
 	"name": "@je-es/ast-analyzer",
-	"version": "0.0.8",
-	"description": "Multi-phase semantic analyzer with type validation, error handling, and LSP support for compilers.",
+	"version": "0.0.9",
+	"description": "Traverses the AST to perform static analysis, semantic checks, and error detection.",
 	"keywords": [
 		"je-es",
 		"ast",
@@ -47,9 +47,9 @@
 		"typescript-eslint": "^8.42.0"
 	},
 	"dependencies": {
-		"@je-es/ast": "^0.1.2",
-		"@je-es/lexer": "^0.1.6",
-		"@je-es/parser": "^0.1.5",
-		"@je-es/syntax": "^0.2.1"
+		"@je-es/ast": "^0.1.5",
+		"@je-es/lexer": "^0.1.8",
+		"@je-es/parser": "^0.1.7",
+		"@je-es/syntax": "^0.2.3"
 	}
 }

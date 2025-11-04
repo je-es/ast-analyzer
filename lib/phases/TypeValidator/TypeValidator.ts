@@ -86,7 +86,11 @@
                     const globalScope = this.config.services.scopeManager.getCurrentScope();
 
                     if (!this.init()) return false;
+
+                    this.config.services.debugManager.pause();
                     if (!this.validateBuiltins(globalScope)) { return false; }
+                    this.config.services.debugManager.resume();
+
                     if (!this.validateAllModules()) return false;
 
                     this.logStatistics();
@@ -178,7 +182,7 @@
                     this.config.services.scopeManager.setCurrentScope(moduleScope.id);
                     this.config.services.contextTracker.setScope(moduleScope.id);
 
-                    for (const statement of module.statements) {
+                    for (const statement of module.stmts) {
                         this.validateStmt(statement, moduleScope, moduleName);
                     }
 

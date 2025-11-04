@@ -191,10 +191,12 @@
             public diagnostics          : Diagnostic[] = [];
             private readonly strictMode : boolean;
             private contextTracker      : ContextTracker;
+            private diagnosticFilter    : boolean;
 
-            constructor(contextTracker: ContextTracker, strictMode = false) {
+            constructor(contextTracker: ContextTracker, strictMode = false, diagnosticFilter = true) {
                 this.strictMode         = strictMode;
                 this.contextTracker     = contextTracker;
+                this.diagnosticFilter   = diagnosticFilter;
             }
 
         // └────────────────────────────────────────────────────────────────────┘
@@ -225,6 +227,7 @@
                     return;
                 }
 
+                if(diagnostic.sourceModuleName === 'global-scope-module') return;
                 this.diagnostics.push(diagnostic);
             }
 
@@ -345,6 +348,8 @@
             }
 
             private filterDuplicates(diagnostics: Diagnostic[]): Diagnostic[] {
+                if(!this.diagnosticFilter) return diagnostics;
+
                 const seen = new Map<string, Diagnostic>();
 
                 const filtered = diagnostics.filter(d =>
